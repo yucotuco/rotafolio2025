@@ -1,4 +1,5 @@
 <?php
+// ==================== SECCIÓN 1: INICIALIZACIÓN Y CONFIGURACIÓN ====================
 // ver_rotafolio.php (Mejoras de usabilidad y diseño) - VERSIÓN ACTUALIZADA CON TODAS LAS MEJORAS
 session_start();
 
@@ -6,7 +7,7 @@ session_start();
 $base_path = dirname(dirname(__FILE__));
 require_once $base_path . '/conn/connrota.php';
 require_once $base_path . '/funcionesyClases/claseRotafolio.php';
-require_once $base_path . '/funcionesyClases/claseRotafolioUpdate.php'; // NUEVO: Clase de actualización
+require_once $base_path . '/funcionesyClases/claseRotafolioUpdate.php';
 
 // CONSTANTES
 if (!defined('SITIO_NOMBRE')) define('SITIO_NOMBRE', 'Rotafolio');
@@ -47,6 +48,7 @@ set_error_handler(function ($severity, $message, $file, $line) {
     return true;
 });
 
+// ==================== SECCIÓN 2: MANAGERS Y PARÁMETROS ====================
 // MANAGERS
 $rotaManager = new RotafolioManager($pdoRota);
 $rotaUpdateManager = new RotafolioUpdateManager($pdoRota);
@@ -54,11 +56,13 @@ $rotaUpdateManager = new RotafolioUpdateManager($pdoRota);
 // PARAMETROS
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
+// ==================== SECCIÓN 3: SESIÓN Y PERMISOS ====================
 // SESIÓN Y PERMISOS
 $usuario_logueado = false;
 $usuario_id = 0;
 $usuario_nombre = '';
 $usuario_email = '';
+$usuario_avatar = '';
 
 if (isset($_SESSION['user_id'])) {
     $usuario_logueado = true;
@@ -72,6 +76,10 @@ if (isset($_SESSION['user_id'])) {
         if ($usuario_data) {
             $usuario_nombre = $usuario_data['nombre'] . ' ' . $usuario_data['apellido'];
             $usuario_email = $usuario_data['correo'];
+            // Generar avatar con iniciales
+            $inicial = strtoupper(substr($usuario_data['nombre'], 0, 1));
+            $inicial2 = strtoupper(substr($usuario_data['apellido'], 0, 1));
+            $usuario_avatar = $inicial . $inicial2;
         }
     } catch (PDOException $e) {
         error_log("Error al obtener datos del usuario: " . $e->getMessage());
@@ -83,6 +91,7 @@ if ($usuario_logueado && $id > 0) {
     $es_propietario = $rotaManager->esPropietarioRotafolio($id, $usuario_id);
 }
 
+// ==================== SECCIÓN 4: CONTENIDO ROTAFOLIO ====================
 // CONTENIDO ROTAFOLIO
 $contenido              = null;
 $error_tipo             = '';
@@ -119,6 +128,7 @@ try {
     error_log("Error en ver_rotafolio.php: " . $e->getMessage());
 }
 
+// ==================== SECCIÓN 5: IDENTIFICACIÓN VISITANTE Y MENSAJES ====================
 // IDENTIFICAR VISITANTE
 $visitante_id = $_COOKIE['rotafolio_visitor'] ?? null;
 if (!$visitante_id) {
@@ -142,6 +152,7 @@ if (isset($_GET['mensaje']) && isset($_GET['tipo'])) {
 $mensaje_exito = $mensaje_exito ?? '';
 $error_agregar = $error_agregar ?? '';
 
+// ==================== SECCIÓN 6: MANEJO POST NO-AJAX ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contenido && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
     // ACTUALIZAR INFO (propietario)
     if (isset($_POST['actualizar_info']) && $es_propietario) {
@@ -224,7 +235,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contenido && !isset($_SERVER['HTTP
                     'p' => 1,
                     't' => time(),
                     'img_header' => $url_imagen_header,
-                    'archivo_adjunto' => $url_archivo_adjunto
+                    'archivo_adjunto' => $url_archivo_adjunto,
+                    'avatar' => $usuario_avatar ?: substr($usuario_nombre, 0, 2)
                 ]);
 
                 try {
@@ -256,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contenido && !isset($_SERVER['HTTP
     }
 }
 
-// OBTENER POSTS
+// ==================== SECCIÓN 7: OBTENER POSTS ====================
 $posts    = [];
 $mis_posts = [];
 
@@ -278,6 +290,17 @@ if ($contenido) {
                 $post['editado']          = isset($metadata['e']);
                 if ($post['es_mio'] && !$es_propietario) $mis_posts[] = $post['id'];
                 $post['nombre_display']   = $metadata['n'] ?? 'Anónimo';
+                $post['avatar']           = $metadata['avatar'] ?? '';
+
+                // Si no hay avatar, crear uno basado en el nombre
+                if (empty($post['avatar']) && !empty($post['nombre_display'])) {
+                    $nombres = explode(' ', $post['nombre_display']);
+                    $post['avatar'] = strtoupper(
+                        substr($nombres[0], 0, 1) .
+                            (isset($nombres[1]) ? substr($nombres[1], 0, 1) : substr($nombres[0], 1, 1))
+                    );
+                }
+
                 if ($post['es_propietario'] && $es_propietario)       $post['nombre_display'] = 'Tú (Propietario)';
                 elseif ($post['es_mio'] && !$es_propietario)          $post['nombre_display'] = 'Tú';
 
@@ -290,6 +313,7 @@ if ($contenido) {
                 $post['es_propietario']   = false;
                 $post['editado']          = false;
                 $post['nombre_display']   = 'Anónimo';
+                $post['avatar']           = '?';
                 $post['imagen_header'] = $post['imagen_header'] ?? null;
                 $post['archivo_adjunto'] = $post['archivo_adjunto'] ?? $post['url_archivo'] ?? null;
             }
@@ -315,6 +339,7 @@ if ($contenido) {
     }
 }
 
+// ==================== SECCIÓN 8: VISTAS Y URL COMPARTIR ====================
 // VISTAS
 if ($contenido && $id > 0 && !$es_propietario) {
     try {
@@ -334,7 +359,7 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
     $mensaje_exito = "¡Operación completada con éxito!";
 }
 
-// ================== AJAX HANDLERS ==================
+// ==================== SECCIÓN 9: MANEJADORES AJAX ====================
 $isAjaxRequest = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
@@ -389,8 +414,10 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
         // nombre visitante
         if ($es_propietario) {
             $nombre_visitante = $usuario_nombre ?: 'Propietario';
+            $avatar = $usuario_avatar ?: substr($nombre_visitante, 0, 2);
         } else {
             $nombre_visitante = trim($_POST['nombre_visitante'] ?? 'Anónimo');
+            $avatar = substr($nombre_visitante, 0, 2);
         }
 
         $meta = json_encode([
@@ -399,7 +426,8 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
             'p' => $es_propietario ? 1 : 0,
             't' => time(),
             'img_header' => $url_imagen_header,
-            'archivo_adjunto' => $url_archivo_adjunto
+            'archivo_adjunto' => $url_archivo_adjunto,
+            'avatar' => $avatar
         ]);
 
         try {
@@ -443,11 +471,13 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
                         $p['metadata']         = $m;
                         $p['imagen_header'] = $m['img_header'] ?? null;
                         $p['archivo_adjunto'] = $m['archivo_adjunto'] ?? null;
+                        $p['avatar'] = $m['avatar'] ?? substr($m['n'] ?? 'A', 0, 2);
                     } else {
                         $p['contenido_limpio'] = '';
                         $p['metadata']         = [];
                         $p['imagen_header'] = null;
                         $p['archivo_adjunto'] = null;
+                        $p['avatar'] = '?';
                     }
 
                     // Ajustar rutas
@@ -510,15 +540,44 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
 
         if ($post_id) {
             // Obtener rotafolio_id para verificar permisos
-            $stmt = $pdoRota->prepare("SELECT rotafolio_id FROM posts WHERE id = ?");
+            $stmt = $pdoRota->prepare("SELECT contenido, rotafolio_id FROM posts WHERE id = ?");
             $stmt->execute([$post_id]);
             $post = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($post) {
                 $rotafolio_id = $post['rotafolio_id'];
 
-                // Verificar permisos manualmente
-                if ($es_propietario || in_array($post_id, $mis_posts)) {
+                // Verificar permisos - CORREGIDO
+                $permiso_concedido = false;
+
+                if ($es_propietario) {
+                    // Propietario siempre tiene permiso
+                    $permiso_concedido = true;
+                } else {
+                    // Extraer metadata para verificar creador
+                    $lines = explode("\n\n", $post['contenido'], 2);
+                    $metadata = [];
+
+                    if (count($lines) >= 2) {
+                        $metadata = json_decode($lines[0], true) ?: [];
+                    }
+
+                    // Verificar si el usuario es el creador del post
+                    if ($usuario_logueado && isset($metadata['v'])) {
+                        // Usuario registrado: verificar si es su post
+                        $permiso_concedido = ($metadata['v'] === 'p_' . $usuario_id);
+                    } elseif (!$usuario_logueado && isset($metadata['v'])) {
+                        // Invitado: verificar si es su post
+                        $permiso_concedido = ($metadata['v'] === $visitante_id);
+                    }
+
+                    // También verificar si está en mis_posts (para invitados)
+                    if (!$permiso_concedido && in_array($post_id, $mis_posts)) {
+                        $permiso_concedido = true;
+                    }
+                }
+
+                if ($permiso_concedido) {
                     // Usar el método eliminarPost existente
                     $success = $rotaManager->eliminarPost($post_id, $rotafolio_id);
 
@@ -548,13 +607,112 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
         exit;
     }
 
+
+    // ====== ELIMINAR ARCHIVO ESPECÍFICO ======
+    if (isset($_POST['eliminar_archivo'])) {
+        $response = ['success' => false, 'message' => ''];
+        $post_id = (int)($_POST['post_id'] ?? 0);
+        $tipo_archivo = $_POST['tipo_archivo'] ?? '';
+
+        if ($post_id && in_array($tipo_archivo, ['imagen_header', 'archivo_adjunto'])) {
+            // Obtener post para verificar permisos
+            $stmt = $pdoRota->prepare("SELECT contenido, rotafolio_id FROM posts WHERE id = ?");
+            $stmt->execute([$post_id]);
+            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($post) {
+                $rotafolio_id = $post['rotafolio_id'];
+
+                // Verificar permisos - CORREGIDO
+                $permiso_concedido = false;
+
+                if ($es_propietario) {
+                    // Propietario siempre tiene permiso
+                    $permiso_concedido = true;
+                } else {
+                    // Extraer metadata para verificar creador
+                    $lines = explode("\n\n", $post['contenido'], 2);
+                    $metadata = [];
+
+                    if (count($lines) >= 2) {
+                        $metadata = json_decode($lines[0], true) ?: [];
+                    }
+
+                    // Verificar si el usuario es el creador del post
+                    if ($usuario_logueado && isset($metadata['v'])) {
+                        // Usuario registrado: verificar si es su post
+                        $permiso_concedido = ($metadata['v'] === 'p_' . $usuario_id);
+                    } elseif (!$usuario_logueado && isset($metadata['v'])) {
+                        // Invitado: verificar si es su post
+                        $permiso_concedido = ($metadata['v'] === $visitante_id);
+                    }
+
+                    // También verificar si está en mis_posts (para invitados)
+                    if (!$permiso_concedido && in_array($post_id, $mis_posts)) {
+                        $permiso_concedido = true;
+                    }
+                }
+
+                if ($permiso_concedido) {
+                    // Extraer metadata para actualizar
+                    $lines = explode("\n\n", $post['contenido'], 2);
+                    $metadata = [];
+                    $contenido_limpio = '';
+
+                    if (count($lines) >= 2) {
+                        $metadata = json_decode($lines[0], true) ?: [];
+                        $contenido_limpio = $lines[1];
+                    } else {
+                        $contenido_limpio = $post['contenido'];
+                    }
+
+                    // Eliminar archivo de metadata
+                    if ($tipo_archivo === 'imagen_header') {
+                        unset($metadata['img_header']);
+                        // También eliminar de la base de datos
+                        $stmt = $pdoRota->prepare("UPDATE posts SET imagen_header = NULL WHERE id = ?");
+                        $stmt->execute([$post_id]);
+                    } else {
+                        unset($metadata['archivo_adjunto']);
+                        // También eliminar de la base de datos
+                        $stmt = $pdoRota->prepare("UPDATE posts SET archivo_adjunto = NULL, url_archivo = NULL WHERE id = ?");
+                        $stmt->execute([$post_id]);
+                    }
+
+                    // Reconstruir contenido con metadata actualizada
+                    $nuevo_contenido = json_encode($metadata) . "\n\n" . $contenido_limpio;
+
+                    // Actualizar en base de datos
+                    $stmt = $pdoRota->prepare("UPDATE posts SET contenido = ? WHERE id = ?");
+                    if ($stmt->execute([$nuevo_contenido, $post_id])) {
+                        $response['success'] = true;
+                        $response['message'] = "Archivo eliminado correctamente";
+                    } else {
+                        $response['message'] = "Error al actualizar el post";
+                    }
+                } else {
+                    $response['message'] = "No tienes permiso para eliminar este archivo";
+                }
+            } else {
+                $response['message'] = "Post no encontrado";
+            }
+        } else {
+            $response['message'] = "Parámetros inválidos";
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        exit;
+    }
+
     // NO RECONOCIDA
     header('Content-Type: application/json');
     echo json_encode(['success' => false, 'message' => 'Solicitud no reconocida']);
     exit;
 }
 
-// ================== RENDER HELPERS ==================
+// ==================== SECCIÓN 10: FUNCIONES DE RENDERIZADO ====================
+// FUNCIONES DE RENDERIZADO
 function getTipoIcon($tipo)
 {
     return 'card-text';
@@ -621,19 +779,50 @@ function renderPostsGrid($posts, $base_path)
     $out .= '</div>';
     return $out;
 }
+
+function tiempoRelativo($timestamp)
+{
+    $diferencia = time() - $timestamp;
+
+    if ($diferencia < 60) return 'Hace un momento';
+    if ($diferencia < 120) return 'Hace 1 minuto';
+    if ($diferencia < 3600) return 'Hace ' . floor($diferencia / 60) . ' minutos';
+    if ($diferencia < 7200) return 'Hace 1 hora';
+    if ($diferencia < 86400) return 'Hace ' . floor($diferencia / 3600) . ' horas';
+    if ($diferencia < 172800) return 'Ayer';
+    if ($diferencia < 2592000) return 'Hace ' . floor($diferencia / 86400) . ' días';
+    if ($diferencia < 5184000) return 'Hace 1 mes';
+    if ($diferencia < 31536000) return 'Hace ' . floor($diferencia / 2592000) . ' meses';
+
+    return date('d/m/Y', $timestamp);
+}
+
+function getColorAvatar($nombre)
+{
+    // Colores consistentes para avatares
+    $colores = ['#0d6efd', '#198754', '#dc3545', '#ffc107', '#0dcaf0', '#6f42c1', '#20c997', '#fd7e14'];
+    $hash = crc32($nombre);
+    return $colores[abs($hash) % count($colores)];
+}
+
 function renderPostCard($post, $base_path)
 {
+    // Agregar estas variables globales
+    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id;
+
     $postId     = (int)$post['id'];
     $color      = $post['color'] ?? '#ffffff';
     $contenido  = $post['contenido_limpio'] ?? $post['contenido'] ?? '';
     $imagen_header = $post['imagen_header'] ?? null;
     $archivo_adjunto = $post['archivo_adjunto'] ?? null;
     $nombre_autor = $post['nombre_display'] ?? 'Anónimo';
+    $avatar = $post['avatar'] ?? '?';
+
 
     // 1. OBTENER Y FORMATEAR FECHA
-    // Usamos el timestamp de la metadata ('t') o la fecha de creación de la BD
     $timestamp = $post['metadata']['t'] ?? strtotime($post['fecha_creacion']);
-    $fecha_formateada = date('d M Y, h:i A', $timestamp); // Ej: 23 Dic 2025, 09:30 PM
+    $fecha_formateada = date('d M Y, h:i A', $timestamp);
+    $fecha_relativa = tiempoRelativo($timestamp);
 
     // Calcular palabras para ver si mostramos botón "ver más"
     $contenido_texto = strip_tags($contenido);
@@ -646,43 +835,87 @@ function renderPostCard($post, $base_path)
         $contenido_limitado = limitarPalabrasHTML($contenido, 250);
     }
 
-    // Permisos
-    global $es_propietario, $usuario_logueado, $usuario_id;
-    $puede_editar = ($es_propietario || ($usuario_logueado && isset($post['metadata']['v']) && $post['metadata']['v'] === 'p_' . $usuario_id));
-    $puede_eliminar = $es_propietario || $post['es_mio'];
+    // Permisos - SECCIÓN A MODIFICAR (PUNTO 1)
+
+    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id;
+
+    // INICIO MODIFICACIÓN PUNTO 1
+    // Usuarios registrados: pueden editar/eliminar solo sus propios posts
+    // Invitados: solo pueden eliminar sus posts (no editar)
+    // Propietario del rotafolio: puede editar/eliminar todos los posts
+
+
+    $post_creado_por_usuario = false;
+    if (isset($post['metadata']['v'])) {
+        if ($usuario_logueado) {
+            // Usuario registrado: verificar si el post tiene 'p_' + user_id
+            // O si fue creado por el mismo visitante (cuando era invitado)
+            $post_creado_por_usuario = ($post['metadata']['v'] === 'p_' . $usuario_id) ||
+                ($post['metadata']['v'] === $visitante_id);
+        } else {
+            // Invitado: verificar si el post tiene su visitante_id
+            $post_creado_por_usuario = ($post['metadata']['v'] === $visitante_id);
+        }
+    }
+
+    if ($es_propietario) {
+        // Propietario del rotafolio puede hacer todo
+        $puede_editar = true;
+        $puede_eliminar = true;
+    } elseif ($usuario_logueado) {
+        // Usuario registrado (no propietario)
+        // Puede editar y eliminar solo sus propios posts
+        $puede_editar = $post_creado_por_usuario;
+        $puede_eliminar = $post_creado_por_usuario;
+    } else {
+        // Usuario invitado
+        $puede_editar = false; // Invitados NO pueden editar
+        $puede_eliminar = $post_creado_por_usuario; // Solo eliminar sus posts
+    }
+    // FIN MODIFICACIÓN PUNTO 1
+
+    // Color de avatar consistente
+    $color_avatar = getColorAvatar($nombre_autor);
 
     // --- INICIO HTML DE LA TARJETA ---
-    // Nota: Quitamos 'h-100' para permitir altura dinámica
     $card  = '<div class="card" id="post-' . $postId . '" data-post-id="' . $postId . '" style="background-color:' . htmlspecialchars($color) . ';">';
 
-    // A. IMAGEN DE ENCABEZADO (Sin cambios)
+    // A. IMAGEN DE ENCABEZADO - CON BOTÓN DE ELIMINAR INTEGRADO (PUNTO 2)
     if (!empty($imagen_header)) {
         $abs = $base_path . '/' . str_replace('../', '', $imagen_header);
         if (file_exists($abs)) {
+            $card .= '<div class="position-relative">';
             $card .= '<img src="' . htmlspecialchars($imagen_header) . '" class="card-img-top post-header-image" alt="Imagen">';
+            // Botón de eliminar integrado en la imagen
+            if ($puede_editar) {
+                $card .= '<button class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2 eliminar-archivo-btn" data-post-id="' . $postId . '" data-tipo="imagen_header" title="Eliminar imagen" style="z-index: 5;">';
+                $card .= '<i class="bi bi-trash"></i>';
+                $card .= '</button>';
+            }
+            $card .= '</div>';
         }
     }
 
     $card .= '<div class="card-body p-3">';
 
-    // B. HEADER MEJORADO: Autor + Fecha ARRIBA
+    // B. HEADER MEJORADO: Avatar + Nombre + Fecha ARRIBA
     $card .= '<div class="d-flex justify-content-between align-items-start mb-2 pb-2 border-bottom border-light border-opacity-50">';
-    // Columna Izquierda: Icono, Nombre y Fecha
+    // Columna Izquierda: Avatar, Nombre y Fecha
     $card .= '<div class="d-flex align-items-center">';
-    $card .= '<div class="rounded-circle bg-dark bg-opacity-10 d-flex align-items-center justify-content-center me-2" style="width:32px; height:32px; font-size:0.8rem;">';
-    $card .= strtoupper(substr($nombre_autor, 0, 1));
+    $card .= '<div class="rounded-circle d-flex align-items-center justify-content-center me-2" style="width:36px; height:36px; font-size:0.9rem; color:white; background-color:' . $color_avatar . ';">';
+    $card .= htmlspecialchars($avatar);
     $card .= '</div>';
     $card .= '<div style="line-height: 1.2;">';
     $card .= '<div class="fw-bold small">' . htmlspecialchars($nombre_autor) . '</div>';
-    // AQUÍ ESTÁ LA FECHA ARRIBA
-    $card .= '<div class="text-muted" style="font-size: 0.7rem;">' . $fecha_formateada . '</div>';
+    // Fecha relativa con tooltip de fecha exacta
+    $card .= '<div class="text-muted" style="font-size: 0.7rem;" title="' . $fecha_formateada . '">' . $fecha_relativa . '</div>';
     $card .= '</div>';
     $card .= '</div>';
 
     // Columna Derecha: Acciones (Editar/Eliminar) + Badge Editado
     $card .= '<div class="d-flex align-items-center gap-1">';
     if ($post['editado'] ?? false) {
-        $card .= '<span class="badge bg-dark bg-opacity-10 text-dark me-1" style="font-size:0.6rem;">Editado</span>';
+        $card .= '<span class="badge bg-dark bg-opacity-10 text-dark me-1" style="font-size:0.6rem;" title="Editado el ' . date('d/m/Y H:i', $post['metadata']['e']) . '">Editado</span>';
     }
     if ($puede_eliminar || $puede_editar) {
         $card .= '<div class="dropdown">';
@@ -702,7 +935,6 @@ function renderPostCard($post, $base_path)
     $card .= '</div>'; // Fin Header
 
     // C. CONTENIDO (Altura dinámica automática)
-    // Quitamos clases de altura fija o overflow
     $card .= '<div class="post-content mb-3">';
     if ($num_palabras > 250) {
         $card .= '<div class="contenido-limitado">' . $contenido_limitado . '</div>';
@@ -714,7 +946,7 @@ function renderPostCard($post, $base_path)
     }
     $card .= '</div>';
 
-    // D. ARCHIVO ADJUNTO (Si existe)
+    // D. ARCHIVO ADJUNTO (Si existe) - CON BOTÓN DE ELIMINAR
     if (!empty($archivo_adjunto)) {
         $abs = $base_path . '/' . str_replace('../', '', $archivo_adjunto);
         if (file_exists($abs)) {
@@ -733,26 +965,24 @@ function renderPostCard($post, $base_path)
             $card .= '<div class="text-truncate fw-medium">' . htmlspecialchars($filename) . '</div>';
             $card .= '<div class="text-muted small" style="font-size:0.7rem;">' . $filetype . '</div>';
             $card .= '</div>';
-            $card .= '<a href="' . htmlspecialchars($archivo_adjunto) . '" class="btn btn-sm btn-light rounded-circle" target="_blank" download><i class="bi bi-download"></i></a>';
+            $card .= '<div class="btn-group">';
+            $card .= '<a href="' . htmlspecialchars($archivo_adjunto) . '" class="btn btn-sm btn-light rounded-circle me-1" target="_blank" download><i class="bi bi-download"></i></a>';
+            if ($puede_editar) {
+                $card .= '<button class="btn btn-sm btn-outline-danger rounded-circle eliminar-archivo-btn" data-post-id="' . $postId . '" data-tipo="archivo_adjunto" title="Eliminar archivo"><i class="bi bi-trash"></i></button>';
+            }
+            $card .= '</div>';
             $card .= '</div>';
         }
     }
 
     $card .= '</div>'; // Cierre card-body
-    // Nota: NO agregamos card-footer. La fecha ya está arriba.
-
     $card .= '</div>'; // Cierre card
+
     return $card;
 }
+// Fin de renderPostCard
 
-// VISTAS
-if ($contenido && $id > 0 && !$es_propietario) {
-    try {
-        @$pdoRota->prepare("UPDATE rotafolios SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?")->execute([$id]);
-    } catch (PDOException $e) { /* ignorar */
-    }
-}
-
+// ==================== SECCIÓN 11: HTML Y CSS ====================
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -765,6 +995,9 @@ if ($contenido && $id > 0 && !$es_propietario) {
     <!-- Bootstrap / Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+    <!-- SweetAlert2 para confirmaciones -->
+    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
 
     <!-- TinyMCE Self-Hosted (Asegúrate de tenerlo en /tinymce/) -->
     <script src="../tinymce/tinymce.min.js"></script>
@@ -881,7 +1114,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
             display: flex;
             flex-direction: column;
             min-height: 300px;
-            /* Altura mínima, no fija */
         }
 
         .card:hover {
@@ -969,12 +1201,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
         .post-contenido-largo .contenido-limitado::-webkit-scrollbar-thumb:hover {
             background: rgba(0, 0, 0, 0.3);
-        }
-
-        /* Para posts con poco contenido - altura automática */
-        .post-contenido-normal {
-            max-height: none !important;
-            overflow-y: visible !important;
         }
 
         /* Estilos para el botón "Ver más" */
@@ -1174,11 +1400,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
             .post-header-placeholder {
                 height: 150px;
             }
-
-            /* MODIFICADO: Ajustar altura de contenido en móviles */
-            .card-content {
-                max-height: 250px;
-            }
         }
 
         @media (max-width: 576px) {
@@ -1199,7 +1420,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 margin: 0.5rem;
             }
 
-            /* MODIFICADO: Ajustar botones en móviles */
             .btn-group-sm .btn {
                 padding: 0.2rem 0.4rem;
                 font-size: 0.8rem;
@@ -1412,22 +1632,17 @@ if ($contenido && $id > 0 && !$es_propietario) {
         /* El item individual (la tarjeta) */
         .masonry-item {
             break-inside: avoid;
-            /* Evita que la tarjeta se parta entre columnas */
             margin-bottom: 1.5rem;
-            /* Espacio vertical entre tarjetas */
         }
 
         /* --- AJUSTES DE LA TARJETA --- */
         .card {
-            /* Quitamos height: 100% para que se ajuste al contenido */
             height: auto !important;
             min-height: 0 !important;
-            /* Resetear min-height */
             display: flex;
             flex-direction: column;
             border: none;
             border-radius: 16px;
-            /* Bordes más redondeados estilo app */
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
             transition: transform 0.2s, box-shadow 0.2s;
         }
@@ -1436,7 +1651,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
             transform: translateY(-4px);
             box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
             z-index: 2;
-            /* Que se sobreponga ligeramente al pasar el mouse */
         }
 
         /* Ajuste fino para el header de la tarjeta */
@@ -1445,11 +1659,33 @@ if ($contenido && $id > 0 && !$es_propietario) {
             margin-bottom: 0.5rem;
             border-bottom: 1px solid rgba(0, 0, 0, 0.05);
         }
+
+        /* Estilos para botón de eliminar imagen (PUNTO 2) */
+        .card-img-top.position-relative .btn-danger {
+            opacity: 0.8;
+            transition: opacity 0.3s;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .card-img-top.position-relative .btn-danger:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        .post-header-image {
+            position: relative;
+        }
     </style>
 </head>
 
 <body>
-    <!-- Barra de usuario - FIJADA EN LA PARTE SUPERIOR -->
+    <!-- ==================== SECCIÓN 12: BARRA DE USUARIO ==================== -->
     <div class="container-fluid py-2 bg-white border-bottom shadow-sm sticky-top">
         <div class="container">
             <div class="d-flex justify-content-between align-items-center">
@@ -1466,7 +1702,7 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     <div class="user-info">
                         <?php if ($usuario_logueado): ?>
                             <div class="user-avatar">
-                                <?php echo strtoupper(substr(explode(' ', $usuario_nombre)[0], 0, 1) . substr(explode(' ', $usuario_nombre)[1] ?? '', 0, 1)); ?>
+                                <?php echo $usuario_avatar; ?>
                             </div>
                             <div>
                                 <div class="user-name"><?php echo htmlspecialchars(explode(' ', $usuario_nombre)[0]); ?></div>
@@ -1498,11 +1734,11 @@ if ($contenido && $id > 0 && !$es_propietario) {
         </div>
     </div>
 
+    <!-- ==================== SECCIÓN 13: CONTENIDO PRINCIPAL ==================== -->
     <div class="container py-4 fade-in">
 
         <?php if ($contenido && !$error_tipo): ?>
 
-            <!-- Header del rotafolio - REORGANIZADO -->
             <!-- Header del rotafolio - MEJORADO CON EXPANSIÓN -->
             <div class="page-header mb-4">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
@@ -1610,15 +1846,7 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 <?php endif; ?>
             </div>
 
-
             <!-- Alertas -->
-            <?php if ($mensaje_exito): ?>
-                <div class="alert alert-success alert-dismissible fade show">
-
-                    <i class="bi bi-check-circle-fill me-2"></i><?php echo $mensaje_exito; ?>
-                    <button class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            <?php endif; ?>
             <?php if ($error_agregar): ?>
                 <div class="alert alert-danger alert-dismissible fade show">
                     <i class="bi bi-exclamation-triangle-fill me-2"></i><?php echo $error_agregar; ?>
@@ -1680,7 +1908,7 @@ if ($contenido && $id > 0 && !$es_propietario) {
             </button>
         <?php endif; ?>
 
-        <!-- Modales -->
+        <!-- ==================== SECCIÓN 14: MODALES ==================== -->
         <?php if ($contenido && ($permite_posts_publicos || $es_propietario)): ?>
             <!-- Modal: Agregar Post -->
             <div class="modal fade" id="agregarPostModal" tabindex="-1" aria-hidden="true">
@@ -1720,7 +1948,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                                                 <p class="small mb-1">Haz clic para seleccionar imagen</p>
                                                 <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
                                             </div>
-                                            <!-- MODIFICADO: Agregado capture="environment" para móviles -->
                                             <input type="file" class="form-control d-none"
                                                 name="<?php echo $es_propietario ? 'imagen_header' : 'imagen_header_publico'; ?>"
                                                 id="imagenHeaderInput"
@@ -1781,7 +2008,7 @@ if ($contenido && $id > 0 && !$es_propietario) {
             </div>
         <?php endif; ?>
 
-        <!-- ====== MODAL: Editar Post - NUEVA IMPLEMENTACIÓN ====== -->
+        <!-- Modal: Editar Post -->
         <div class="modal fade" id="editarPostModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered modal-lg">
                 <div class="modal-content">
@@ -1791,7 +2018,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     </div>
                     <form method="POST" enctype="multipart/form-data" id="formEditarPost"
                         action="ver_rotafolio_update.php">
-                        <!-- Campos ocultos necesarios -->
                         <input type="hidden" name="accion" value="actualizar_post">
                         <input type="hidden" name="rotafolio_id" value="<?php echo $id; ?>">
                         <input type="hidden" name="post_id" id="postIdEdit">
@@ -1811,7 +2037,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                                             <p class="small mb-1" id="headerEditText">Haz clic para seleccionar imagen</p>
                                             <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
                                         </div>
-                                        <!-- MODIFICADO: Agregado capture="environment" para móviles -->
                                         <input type="file" class="form-control d-none"
                                             name="imagen_header_edit"
                                             id="imagenHeaderEditInput"
@@ -2029,9 +2254,11 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
     </div> <!-- /container -->
 
+    <!-- ==================== SECCIÓN 15: JAVASCRIPT ==================== -->
     <!-- Scripts -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <script>
         // Config global
@@ -2083,7 +2310,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                         },
                         setup: function(editor) {
                             editor.on('init', function() {
-                                console.log('Editor principal inicializado');
                                 editor.setContent('');
                                 setTimeout(() => editor.focus(), 100);
                             });
@@ -2091,11 +2317,7 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     });
                 } catch (error) {
                     console.error('Error al inicializar TinyMCE:', error);
-                    mostrarErrorFallback();
                 }
-            } else {
-                console.log('TinyMCE no disponible, usando textarea normal');
-                mostrarErrorFallback();
             }
         }
 
@@ -2137,7 +2359,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                         },
                         setup: function(editor) {
                             editor.on('init', function() {
-                                console.log('Editor de edición inicializado');
                                 if (contenido) {
                                     editor.setContent(contenido);
                                 }
@@ -2147,7 +2368,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     });
                 } catch (error) {
                     console.error('Error al inicializar editor de edición:', error);
-                    // Fallback: usar textarea normal
                     const textarea = document.getElementById('editorContenidoEdit');
                     if (textarea && contenido) {
                         textarea.value = contenido;
@@ -2163,7 +2383,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
         // Inicializar editor de edición cuando se abra el modal
         document.getElementById('editarPostModal')?.addEventListener('shown.bs.modal', function() {
-            // El contenido se carga dinámicamente antes de abrir el modal
             if (window.currentPostData && window.currentPostData.contenido) {
                 inicializarEditorEdicion(window.currentPostData.contenido);
             }
@@ -2181,7 +2400,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 tinymce.remove('editorContenidoEdit');
                 editorEdicion = null;
             }
-            // Limpiar datos
             window.currentPostData = null;
         });
 
@@ -2267,10 +2485,8 @@ if ($contenido && $id > 0 && !$es_propietario) {
             }
         }
 
-        // ====== FUNCIÓN MEJORADA PARA MANEJAR EDICIÓN DE POST ======
-        function manejarActualizacionPost(formData) {
+        async function manejarActualizacionPost(formData) {
             return new Promise((resolve, reject) => {
-                // Intentar con AJAX primero
                 fetch('ver_rotafolio_update.php', {
                         method: 'POST',
                         headers: {
@@ -2292,8 +2508,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                                 redirect: data.redirect
                             });
                         } else {
-                            // Fallback: enviar el formulario de forma tradicional
-                            console.log('Fallback activado - enviando formulario tradicional');
                             const form = document.getElementById('formEditarPost');
                             if (form) {
                                 form.submit();
@@ -2302,8 +2516,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                         }
                     })
                     .catch(error => {
-                        console.log('Fallback activado por error:', error);
-                        // Enviar formulario tradicional
                         const form = document.getElementById('formEditarPost');
                         if (form) {
                             form.submit();
@@ -2316,8 +2528,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
         async function manejarEditarPost(e) {
             e.preventDefault();
 
-            console.log('=== DEBUG: manejarEditarPost iniciado ===');
-
             const btn = document.getElementById('btnEditarPost');
             if (!btn) {
                 console.error('Botón btnEditarPost no encontrado');
@@ -2326,7 +2536,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
             const originalText = btn.innerHTML;
 
-            // Obtener contenido
             let contenido = '';
             try {
                 const editor = tinymce.get('editorContenidoEdit');
@@ -2339,18 +2548,13 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 contenido = document.getElementById('editorContenidoEdit')?.value || '';
             }
 
-            console.log('Contenido obtenido:', contenido.substring(0, 50) + '...');
-
             if (!contenido.trim()) {
                 mostrarError('El contenido es requerido');
                 return;
             }
 
-            // Obtener color seleccionado
             const color = document.getElementById('colorEditado').value;
-            console.log('Color seleccionado:', color);
 
-            // Validar tamaño de archivos
             const imagenInput = document.getElementById('imagenHeaderEditInput');
             const archivoInput = document.getElementById('archivoAdjuntoEditInput');
 
@@ -2364,30 +2568,22 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 return false;
             }
 
-            // Estado de carga
             btn.disabled = true;
             btn.innerHTML = '<span class="loading-spinner me-2"></span>Guardando...';
 
-            // Crear FormData
             const form = e.target;
             const formData = new FormData(form);
-
-            // Asegurar que el contenido esté actualizado
             formData.set('contenido', contenido);
-
-            console.log('FormData creado, enviando a ver_rotafolio_update.php...');
 
             try {
                 const resultado = await manejarActualizacionPost(formData);
 
                 if (resultado.success) {
-                    // Cerrar modal
                     const modal = bootstrap.Modal.getInstance(document.getElementById('editarPostModal'));
                     if (modal) {
                         modal.hide();
                     }
 
-                    // Mostrar mensaje y redirigir
                     mostrarOk(resultado.message);
                     setTimeout(() => {
                         if (resultado.redirect) {
@@ -2402,11 +2598,58 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 }
             } catch (error) {
                 console.log('Proceso continuará con redirección tradicional...');
-                // El fallback ya maneja la redirección
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
             }
+        }
+
+        // ====== ELIMINAR ARCHIVO ======
+        async function eliminarArchivo(postId, tipoArchivo) {
+            return Swal.fire({
+                title: '¿Estás seguro?',
+                text: 'Este archivo se eliminará permanentemente',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Sí, eliminar',
+                cancelButtonText: 'Cancelar'
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    try {
+                        const formData = new FormData();
+                        formData.append('eliminar_archivo', '1');
+                        formData.append('post_id', postId);
+                        formData.append('tipo_archivo', tipoArchivo);
+
+                        const response = await fetch('', {
+                            method: 'POST',
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            body: formData
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            // Actualizar la tarjeta del post
+                            const postCard = document.getElementById('post-' + postId);
+                            if (postCard) {
+                                // Recargar la tarjeta específica o recargar la página
+                                window.location.reload();
+                            }
+                            mostrarOk(data.message);
+                        } else {
+                            mostrarError(data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error al eliminar archivo:', error);
+                        mostrarError('Error de conexión');
+                    }
+                }
+            });
         }
 
         // ====== Event Listeners ======
@@ -2421,7 +2664,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     e.stopPropagation();
                     const btn = e.target.closest('.editar-post-btn');
                     const postId = btn.getAttribute('data-post-id');
-                    console.log('Editar post clickeado:', postId);
                     cargarDatosParaEdicion(postId, btn);
                 }
 
@@ -2431,7 +2673,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     e.stopPropagation();
                     const btn = e.target.closest('.eliminar-post-btn');
                     const postId = btn.getAttribute('data-post-id');
-                    console.log('Eliminar post clickeado:', postId);
                     eliminarPost(postId, btn);
                 }
 
@@ -2441,6 +2682,28 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     e.stopPropagation();
                     manejarVerMas(e);
                 }
+
+                // Botón eliminar archivo - CON VERIFICACIÓN DE PERMISOS PARA INVITADOS
+                if (e.target.closest('.eliminar-archivo-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const btn = e.target.closest('.eliminar-archivo-btn');
+                    const postId = btn.getAttribute('data-post-id');
+                    const tipoArchivo = btn.getAttribute('data-tipo');
+
+                    // Verificar permisos para invitados
+                    if (!window.usuarioLogueado && !window.esPropietario) {
+                        // Para invitados, solo permitir eliminar si el post es suyo
+                        const postCard = document.getElementById('post-' + postId);
+                        if (postCard && !postCard.querySelector('.post-header-image')) {
+                            // Si no es el creador del post, mostrar error
+                            mostrarError('Los usuarios invitados solo pueden eliminar archivos de sus propios posts');
+                            return;
+                        }
+                    }
+
+                    eliminarArchivo(postId, tipoArchivo);
+                }
             });
 
             // Formulario de agregar post
@@ -2449,10 +2712,9 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 formAgregarPost.addEventListener('submit', manejarAgregarPost);
             }
 
-            // Formulario de editar post - NUEVA IMPLEMENTACIÓN
+            // Formulario de editar post
             const formEditarPost = document.getElementById('formEditarPost');
             if (formEditarPost) {
-                console.log('Configurando listener para formulario de edición');
                 formEditarPost.addEventListener('submit', manejarEditarPost);
             }
 
@@ -2482,28 +2744,23 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
             // Inicializar selección de color
             inicializarSeleccionColor();
-
-            // Configurar inputs para móviles
             configurarInputsParaMovil();
-
-            // Ajustar alturas de cards después de cargar
-            setTimeout(ajustarAlturasCards, 500);
         });
 
         // ====== FUNCIONES PARA EDICIÓN ======
         async function cargarDatosParaEdicion(postId, btnElement) {
             try {
-                console.log('Cargando datos para edición del post:', postId);
-
-                // Mostrar estado de carga
                 const originalHtml = btnElement.innerHTML;
                 btnElement.innerHTML = '<span class="loading-spinner"></span>';
                 btnElement.disabled = true;
 
-                // Enviar solicitud AJAX
                 const formData = new FormData();
                 formData.append('obtener_datos_edicion', '1');
                 formData.append('post_id', postId);
+
+                console.log('Cargando datos para edición del post ID:', postId);
+                console.log('Usuario logueado:', window.usuarioLogueado);
+                console.log('Es propietario:', window.esPropietario);
 
                 const response = await fetch('', {
                     method: 'POST',
@@ -2514,29 +2771,24 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 });
 
                 const data = await response.json();
-                console.log('Datos recibidos:', data);
 
-                // Restaurar botón
+                console.log('Respuesta del servidor:', data);
+
                 btnElement.innerHTML = originalHtml;
                 btnElement.disabled = false;
 
                 if (data.success) {
-                    // Guardar datos globalmente
                     window.currentPostData = data.data;
 
-                    // Configurar modal
                     document.getElementById('postIdEdit').value = postId;
                     document.getElementById('colorEditado').value = data.data.color;
 
-                    // Mostrar información de archivos actuales
                     mostrarInfoArchivosActuales(data.data);
 
-                    // Seleccionar color visualmente
                     document.querySelectorAll('[data-input="colorEditado"]').forEach(el => {
                         el.classList.toggle('selected', el.getAttribute('data-color') === data.data.color);
                     });
 
-                    // Mostrar modal
                     const modal = new bootstrap.Modal(document.getElementById('editarPostModal'));
                     modal.show();
 
@@ -2547,7 +2799,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 console.error('Error al cargar datos:', error);
                 mostrarError('Error de conexión al cargar datos del post');
 
-                // Restaurar botón
                 if (btnElement) {
                     btnElement.innerHTML = '<i class="bi bi-pencil"></i>';
                     btnElement.disabled = false;
@@ -2556,14 +2807,19 @@ if ($contenido && $id > 0 && !$es_propietario) {
         }
 
         function mostrarInfoArchivosActuales(data) {
-            // Mostrar información de imagen actual
             const currentHeaderInfo = document.getElementById('currentHeaderInfo');
             const headerEditText = document.getElementById('headerEditText');
 
             if (data.imagen_header_actual) {
                 currentHeaderInfo.innerHTML = `
-                    <strong>Imagen actual:</strong> ${data.imagen_header_nombre || data.imagen_header_actual.split('/').pop()}
-                    <br><small>Se reemplazará si seleccionas una nueva</small>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Imagen actual:</strong> ${data.imagen_header_nombre || data.imagen_header_actual.split('/').pop()}
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarArchivo(${data.post_id}, 'imagen_header')">
+                            <i class="bi bi-trash"></i> Eliminar
+                        </button>
+                    </div>
                 `;
                 headerEditText.textContent = 'Haz clic para cambiar imagen';
             } else {
@@ -2571,14 +2827,19 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 headerEditText.textContent = 'Haz clic para seleccionar imagen';
             }
 
-            // Mostrar información de archivo actual
             const currentFileInfo = document.getElementById('currentFileInfo');
             const fileEditText = document.getElementById('fileEditText');
 
             if (data.archivo_adjunto_actual) {
                 currentFileInfo.innerHTML = `
-                    <strong>Archivo actual:</strong> ${data.archivo_adjunto_nombre || data.archivo_adjunto_actual.split('/').pop()}
-                    <br><small>Se reemplazará si seleccionas uno nuevo</small>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Archivo actual:</strong> ${data.archivo_adjunto_nombre || data.archivo_adjunto_actual.split('/').pop()}
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarArchivo(${data.post_id}, 'archivo_adjunto')">
+                            <i class="bi bi-trash"></i> Eliminar
+                        </button>
+                    </div>
                 `;
                 fileEditText.textContent = 'Haz clic para cambiar archivo';
             } else {
@@ -2615,7 +2876,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 btnElement.disabled = false;
 
                 if (data.success) {
-                    // Eliminar tarjeta con animación
                     const card = document.getElementById('post-' + postId);
                     if (card) {
                         card.style.opacity = '0';
@@ -2651,23 +2911,18 @@ if ($contenido && $id > 0 && !$es_propietario) {
 
             if (contenidoDiv) {
                 if (btn.classList.contains('expandido')) {
-                    // Volver al estado limitado
                     contenidoDiv.innerHTML = contenidoCompleto;
                     contenidoDiv.style.maxHeight = '300px';
                     contenidoDiv.style.overflowY = 'auto';
                     btn.innerHTML = '<i class="bi bi-chevron-down me-1"></i>Ver menos';
                     btn.classList.remove('expandido');
                 } else {
-                    // Mostrar contenido completo sin límite
                     contenidoDiv.innerHTML = contenidoCompleto;
                     contenidoDiv.style.maxHeight = 'none';
                     contenidoDiv.style.overflowY = 'visible';
                     btn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Ver más';
                     btn.classList.add('expandido');
                 }
-
-                // Reajustar altura de la card
-                ajustarAlturaCard(postId);
             }
         }
 
@@ -2678,7 +2933,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
             const btn = document.getElementById('btnAgregarPost');
             const txt = btn.innerHTML;
 
-            // Obtener contenido del editor
             let contenido = '';
             if (editorPrincipal && tinymce.get('editorContenido')) {
                 contenido = tinymce.get('editorContenido').getContent();
@@ -2691,7 +2945,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 return false;
             }
 
-            // Validar tamanno de archivos
             const imagenHeaderInput = document.getElementById('imagenHeaderInput');
             const archivoAdjuntoInput = document.getElementById('archivoAdjuntoInput');
 
@@ -2709,7 +2962,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
             btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Publicando...';
 
             const fd = new FormData(form);
-            // Agregar contenido al FormData
             if (esPropietario) {
                 fd.set('contenido_post_editor', contenido);
             } else {
@@ -2736,7 +2988,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     const modal = bootstrap.Modal.getInstance(document.getElementById('agregarPostModal'));
                     if (modal) modal.hide();
                     form.reset();
-                    // Resetear previews
                     document.getElementById('headerPreview').innerHTML = `
                         <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                         <p class="small mb-1">Haz clic para seleccionar imagen</p>
@@ -2749,11 +3000,9 @@ if ($contenido && $id > 0 && !$es_propietario) {
                     `;
                     document.getElementById('headerPreviewContainer').classList.remove('has-file');
                     document.getElementById('filePreviewContainer').classList.remove('has-file');
-                    // Resetear editor
                     if (tinymce.get('editorContenido')) {
                         tinymce.get('editorContenido').setContent('');
                     }
-                    // Resetear selección de color
                     inicializarSeleccionColor();
                 } else {
                     mostrarError(data.message || 'Error al agregar el post');
@@ -2805,34 +3054,28 @@ if ($contenido && $id > 0 && !$es_propietario) {
         function agregarPostAlDOM(html) {
             const container = document.getElementById('postsRow');
             if (!container) {
-                // Si no existe el contenedor (era el primer post), crearlo
                 const emptyMsg = document.querySelector('.empty-state');
                 if (emptyMsg) emptyMsg.remove();
 
-                // Crear contenedor Masonry
                 const newContainer = document.createElement('div');
                 newContainer.className = 'masonry-container fade-in';
                 newContainer.id = 'postsRow';
 
-                // Crear item masonry
                 const newItem = document.createElement('div');
                 newItem.className = 'masonry-item';
                 newItem.innerHTML = html;
 
                 newContainer.appendChild(newItem);
 
-                // Insertar después del header
                 const alertArea = document.querySelector('.alert') || document.querySelector('.page-header');
                 alertArea.after(newContainer);
             } else {
-                // Crear item masonry
                 const newItem = document.createElement('div');
                 newItem.className = 'masonry-item fade-in';
                 newItem.innerHTML = html;
                 container.prepend(newItem);
             }
 
-            // Actualizar contadores... (tu código existente)
             actualizarContadores();
         }
 
@@ -2849,42 +3092,8 @@ if ($contenido && $id > 0 && !$es_propietario) {
             if (misPostsCountElement) misPostsCountElement.textContent = window.misPostsCount;
         }
 
-        // ====== FUNCIONES PARA AJUSTAR ALTURA ======
-        function ajustarAlturasCards() {
-            document.querySelectorAll('.card').forEach(card => {
-                ajustarAlturaCardPorElemento(card);
-            });
-        }
-
-        function ajustarAlturaCardPorElemento(card) {
-            const contenidoDiv = card.querySelector('.post-content');
-            if (contenidoDiv) {
-                const texto = contenidoDiv.textContent || contenidoDiv.innerText || '';
-                const palabras = texto.trim().split(/\s+/).filter(word => word.length > 0);
-
-                // Altura mínima basada en contenido
-                if (palabras.length < 50) {
-                    card.style.minHeight = '250px';
-                } else if (palabras.length < 100) {
-                    card.style.minHeight = '300px';
-                } else if (palabras.length < 200) {
-                    card.style.minHeight = '350px';
-                } else {
-                    card.style.minHeight = '400px';
-                }
-            }
-        }
-
-        function ajustarAlturaCard(postId) {
-            const card = document.getElementById('post-' + postId);
-            if (card) {
-                ajustarAlturaCardPorElemento(card);
-            }
-        }
-
         // ====== UI helpers ======
         function inicializarSeleccionColor() {
-            // Para modal agregar post
             const colorInputId = window.esPropietario ? 'color_post_editor' : 'colorPost';
             const hiddenInput = document.getElementById(colorInputId);
             if (hiddenInput && hiddenInput.value) {
@@ -2894,7 +3103,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 });
             }
 
-            // Para modal editar post
             const colorEditadoInput = document.getElementById('colorEditado');
             if (colorEditadoInput && colorEditadoInput.value) {
                 const color = colorEditadoInput.value;
@@ -2909,12 +3117,10 @@ if ($contenido && $id > 0 && !$es_propietario) {
             const hidden = document.getElementById(inputId);
             if (hidden) hidden.value = color;
 
-            // Remover selección anterior
             document.querySelectorAll(`[data-input="${inputId}"]`).forEach(item => {
                 item.classList.remove('selected');
             });
 
-            // Agregar selección actual
             el.classList.add('selected');
         }
 
@@ -2923,12 +3129,10 @@ if ($contenido && $id > 0 && !$es_propietario) {
             const hidden = document.getElementById(inputId);
             if (hidden) hidden.value = color;
 
-            // Remover selección anterior
             document.querySelectorAll(`[data-input="${inputId}"]`).forEach(item => {
                 item.classList.remove('selected');
             });
 
-            // Agregar selección actual
             el.classList.add('selected');
         }
 
@@ -2986,69 +3190,46 @@ if ($contenido && $id > 0 && !$es_propietario) {
         }
 
         function mostrarError(msg) {
-            const el = document.createElement('div');
-            el.className = 'alert alert-danger alert-dismissible fade show position-fixed';
-            el.style.cssText = 'top: 20px; right: 20px; z-index: 2000; max-width: 400px;';
-            el.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
-                    <div class="flex-grow-1">
-                        <strong>Error</strong>
-                        <div class="small">${msg}</div>
-                    </div>
-                    <button class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            `;
-            document.body.appendChild(el);
-            setTimeout(() => {
-                if (el.parentNode) {
-                    el.remove();
-                }
-            }, 5000);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: msg,
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000,
+                timerProgressBar: true
+            });
         }
 
         function mostrarOk(msg) {
-            const el = document.createElement('div');
-            el.className = 'alert alert-success alert-dismissible fade show position-fixed';
-            el.style.cssText = 'top: 20px; right: 20px; z-index: 2000; max-width: 400px;';
-            el.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <i class="bi bi-check-circle-fill fs-4 me-3"></i>
-                    <div class="flex-grow-1">
-                        <strong>¡Éxito!</strong>
-                        <div class="small">${msg}</div>
-                    </div>
-                    <button class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            `;
-            document.body.appendChild(el);
-            setTimeout(() => {
-                if (el.parentNode) {
-                    el.remove();
-                }
-            }, 3000);
+            Swal.fire({
+                icon: 'success',
+                title: '¡Éxito!',
+                text: msg,
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000,
+                timerProgressBar: true
+            });
         }
 
-        // Función para cerrar modal de edición
         function cerrarModalEdicion() {
             const modal = bootstrap.Modal.getInstance(document.getElementById('editarPostModal'));
             if (modal) {
                 modal.hide();
-                console.log('Modal de edición cerrado');
 
-                // Limpiar el editor
                 if (tinymce.get('editorContenidoEdit')) {
                     tinymce.get('editorContenidoEdit').setContent('');
                     tinymce.remove('editorContenidoEdit');
                 }
 
-                // Resetear formulario
                 const form = document.getElementById('formEditarPost');
                 if (form) {
                     form.reset();
                 }
 
-                // Resetear previews
                 document.getElementById('headerEditPreview').innerHTML = `
                     <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                     <p class="small mb-1" id="headerEditText">Haz clic para seleccionar imagen</p>
@@ -3062,23 +3243,18 @@ if ($contenido && $id > 0 && !$es_propietario) {
             }
         }
 
-        // Agregar listener para cuando el modal se oculta
         document.getElementById('editarPostModal')?.addEventListener('hidden.bs.modal', function() {
             cerrarModalEdicion();
         });
 
-        // ====== FUNCIONES AGREGADAS PARA MANEJO MÓVIL Y MEJORAS ======
-
-        // Detectar si es dispositivo móvil
+        // ====== FUNCIONES PARA MANEJO MÓVIL ======
         function esDispositivoMovil() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         }
 
-        // Configurar inputs de archivo según dispositivo
         function configurarInputsParaMovil() {
             if (!esDispositivoMovil()) return;
 
-            // Permitir captura desde cámara en móviles
             const imagenInputs = document.querySelectorAll('input[type="file"][accept="image/*"]');
             imagenInputs.forEach(input => {
                 if (!input.hasAttribute('capture')) {
@@ -3086,18 +3262,15 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 }
             });
 
-            // Mejorar experiencia táctil
             document.querySelectorAll('.file-preview').forEach(el => {
                 el.style.minHeight = '120px';
                 el.style.padding = '1.5rem';
             });
         }
 
-        // Llamar al cargar la página
         document.addEventListener('DOMContentLoaded', function() {
             configurarInputsParaMovil();
 
-            // También cuando se abran modales
             const modales = ['agregarPostModal', 'editarPostModal', 'editarRotafolioModal'];
             modales.forEach(modalId => {
                 const modal = document.getElementById(modalId);
@@ -3106,49 +3279,18 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 }
             });
 
-            // Detectar cambios en orientación de pantalla
             window.addEventListener('orientationchange', function() {
                 setTimeout(configurarInputsParaMovil, 100);
-                setTimeout(ajustarAlturasCards, 200);
             });
 
-            // Detectar cambios en tamaño de ventana
             window.addEventListener('resize', function() {
                 if (window.innerWidth <= 768) {
                     configurarInputsParaMovil();
-                    setTimeout(ajustarAlturasCards, 100);
                 }
             });
         });
 
-        // Función mejorada para contar palabras en contenido HTML
-        function contarPalabrasEnHTML(html) {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
-            const text = tempDiv.textContent || tempDiv.innerText || '';
-            const palabras = text.trim().split(/\s+/).filter(word => word.length > 0);
-            return palabras.length;
-        }
-
-        // Verificar y ajustar contenido largo al cargar
-        function ajustarContenidoLargo() {
-            document.querySelectorAll('.post-content').forEach(contenidoDiv => {
-                const html = contenidoDiv.innerHTML;
-                const numPalabras = contarPalabrasEnHTML(html);
-
-                if (numPalabras > 200 && !contenidoDiv.querySelector('.contenido-limitado')) {
-                    // Si ya tiene el botón "Ver más", no hacer nada
-                    return;
-                }
-            });
-        }
-
-        // Ejecutar ajuste de contenido después de cargar posts
-        setTimeout(ajustarContenidoLargo, 500);
-
-        // Mejorar experiencia de formularios en móviles
         if (esDispositivoMovil()) {
-            // Prevenir zoom en inputs
             document.addEventListener('touchstart', function(e) {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
                     document.body.style.zoom = "100%";
@@ -3157,7 +3299,6 @@ if ($contenido && $id > 0 && !$es_propietario) {
                 passive: true
             });
 
-            // Mejorar scroll en modales
             document.querySelectorAll('.modal').forEach(modal => {
                 modal.addEventListener('shown.bs.modal', function() {
                     const modalBody = this.querySelector('.modal-body');

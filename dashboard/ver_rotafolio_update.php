@@ -46,6 +46,36 @@ try {
         redirigir($rotafolio_id, 'Método no permitido', 'error');
     }
 
+
+
+
+    // Verificar si usuario está intentando editar su propio post
+    $stmt = $pdoRota->prepare("SELECT contenido FROM posts WHERE id = ?");
+    $stmt->execute([$post_id]);
+    $post_contenido = $stmt->fetchColumn();
+
+    if ($post_contenido) {
+        $lines = explode("\n\n", $post_contenido, 2);
+        $metadata = count($lines) >= 2 ? json_decode($lines[0], true) : [];
+
+        // DEPURACIÓN: Mostrar información del post
+        error_log("=== DEBUG POST METADATA ===");
+        error_log("Post ID: $post_id");
+        error_log("Usuario ID: $usuario_id");
+        error_log("Visitante ID: $visitante_id");
+        error_log("Metadata: " . json_encode($metadata));
+
+        // Verificación directa
+        if (isset($metadata['v'])) {
+            error_log("Metadata v: " . $metadata['v']);
+            error_log("Es p_ + usuario_id: " . ('p_' . $usuario_id));
+            error_log("¿Coincide con usuario registrado?: " . ($metadata['v'] === 'p_' . $usuario_id ? 'SÍ' : 'NO'));
+            error_log("¿Coincide con visitante?: " . ($metadata['v'] === $visitante_id ? 'SÍ' : 'NO'));
+        }
+    }
+
+
+
     // ACCIÓN: ACTUALIZAR POST
     if ($accion === 'actualizar_post' && $post_id > 0) {
         error_log("=== INICIO ACTUALIZAR POST (update.php) ===");
@@ -65,11 +95,12 @@ try {
         list($permiso, $mensaje_permiso, $post_info) = $rotaUpdateManager->verificarPermisoEdicion(
             $post_id,
             $usuario_id,
-            $visitante_id,
+            $visitante_id,  // ¡IMPORTANTE! Pasar el visitante_id
             $es_propietario_rotafolio
         );
 
         error_log("Resultado verificación permisos: Permiso=" . ($permiso ? 'Sí' : 'No') . ", Mensaje: $mensaje_permiso");
+        error_log("Parámetros enviados: Usuario ID: $usuario_id, Visitante ID: $visitante_id, Es propietario: " . ($es_propietario_rotafolio ? 'Sí' : 'No'));
 
         if (!$permiso) {
             error_log("Permiso denegado: $mensaje_permiso | Usuario ID: $usuario_id | Visitante ID: $visitante_id | Es propietario: " . ($es_propietario_rotafolio ? 'Sí' : 'No'));

@@ -36,45 +36,59 @@ class RotafolioUpdateManager
     }
 
     // ====== VERIFICAR PERMISOS DE EDICIÓN ======
-    public function verificarPermisoEdicion($post_id, $usuario_id, $visitante_id = null, $es_propietario_rotafolio = false)
+
+    public function verificarPermisoEdicion($post_id, $usuario_id, $visitante_id, $es_propietario_rotafolio)
     {
-        try {
-            // Obtener información completa del post
-            $stmt = $this->pdo->prepare("
-                SELECT p.*, r.user_id as propietario_rotafolio 
-                FROM posts p
-                LEFT JOIN rotafolios r ON p.rotafolio_id = r.id
-                WHERE p.id = ?
-            ");
-            $stmt->execute([$post_id]);
-            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+        // 1. Obtener información del post
+        $stmt = $this->pdo->prepare("SELECT contenido, rotafolio_id FROM posts WHERE id = ?");
+        $stmt->execute([$post_id]);
+        $post = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$post) {
-                return [false, "Post no encontrado"];
-            }
-
-            // 1. Propietario del rotafolio puede editar cualquier post
-            if ($es_propietario_rotafolio && $post['propietario_rotafolio'] == $usuario_id) {
-                return [true, "Permiso concedido (propietario del rotafolio)", $post];
-            }
-
-            // 2. Extraer metadata para verificar creador
-            $metadata = $this->extraerMetadata($post['contenido']);
-
-            // 3. Usuario registrado que creó el post
-            if ($usuario_id > 0 && isset($metadata['v']) && $metadata['v'] === 'p_' . $usuario_id) {
-                return [true, "Permiso concedido (creador registrado)", $post];
-            }
-
-            // 4. Visitante que creó el post
-            if ($visitante_id && isset($metadata['v']) && $metadata['v'] === $visitante_id) {
-                return [true, "Permiso concedido (creador visitante)", $post];
-            }
-
-            return [false, "No tienes permiso para editar este post"];
-        } catch (PDOException $e) {
-            return [false, "Error al verificar permisos: " . $e->getMessage()];
+        if (!$post) {
+            return [false, "El post no existe", null];
         }
+
+        // 2. Extraer metadata
+        $lines = explode("\n\n", $post['contenido'], 2);
+        $metadata = count($lines) >= 2 ? json_decode($lines[0], true) : [];
+
+        // 3. Propietario del rotafolio siempre puede editar
+        if ($es_propietario_rotafolio) {
+            return [true, "Permiso concedido", [
+                'post' => $post,
+                'metadata' => $metadata,
+                'rotafolio_id' => $post['rotafolio_id']
+            ]];
+        }
+
+        // 4. Usuario registrado - puede editar sus propios posts
+        if ($usuario_id > 0) {
+            // Verificar si el post fue creado por este usuario
+            if (isset($metadata['v'])) {
+                // Verificar si fue creado como usuario registrado
+                if ($metadata['v'] === 'p_' . $usuario_id) {
+                    return [true, "Permiso concedido (creador del post - usuario registrado)", [
+                        'post' => $post,
+                        'metadata' => $metadata,
+                        'rotafolio_id' => $post['rotafolio_id']
+                    ]];
+                }
+
+                // Verificar si fue creado como visitante y luego el usuario se registró
+                if ($visitante_id && $metadata['v'] === $visitante_id) {
+                    return [true, "Permiso concedido (creador del post - ex visitante)", [
+                        'post' => $post,
+                        'metadata' => $metadata,
+                        'rotafolio_id' => $post['rotafolio_id']
+                    ]];
+                }
+            }
+
+            return [false, "No tienes permiso para editar este post", null];
+        }
+
+        // 5. Usuarios invitados NO PUEDEN EDITAR posts
+        return [false, "Los usuarios invitados no pueden editar posts", null];
     }
 
     // ====== OBTENER DATOS DEL POST PARA EDICIÓN ======

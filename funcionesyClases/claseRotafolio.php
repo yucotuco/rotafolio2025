@@ -35,6 +35,8 @@ class RotafolioManager
         return false;
     }
 
+    // === MÉTODOS EXISTENTES (MANTENER) ===
+
     // Crear rotafolio
     public function crearRotafolio($usuario_id, $titulo, $descripcion = '', $layout = 'muro', $color_fondo = '#0dcaf0')
     {
@@ -133,9 +135,9 @@ class RotafolioManager
                 $posicion_y,
                 $tamanno,
                 $color,
-                $url_archivo_adjunto, // archivo adjunto va en url_archivo
-                $url_imagen_header,   // imagen header en nuevo campo
-                $url_archivo_adjunto  // duplicado en archivo_adjunto para compatibilidad
+                $url_archivo_adjunto,
+                $url_imagen_header,
+                $url_archivo_adjunto
             ]);
             if (!$ok) {
                 return $this->setError("Error al ejecutar INSERT en crearPost: " . implode(", ", $stmt->errorInfo()));
@@ -177,8 +179,6 @@ class RotafolioManager
             return $this->setError("Error al obtener posts: " . $e->getMessage());
         }
     }
-
-
 
     // Eliminar post (nuevo método mejorado)
     public function eliminarPost($post_id, $rotafolio_id)
@@ -488,8 +488,6 @@ class RotafolioManager
                     error_log("DEBUG actualizarPostSimple: Error al procesar imagen: " . $resultado[1]);
                     return [false, $resultado[1]];
                 }
-            } else {
-                error_log("DEBUG actualizarPostSimple: No hay imagen nueva o error en upload");
             }
 
             // Procesar archivo adjunto
@@ -510,8 +508,6 @@ class RotafolioManager
                     error_log("DEBUG actualizarPostSimple: Error al procesar archivo: " . $resultado[1]);
                     return [false, $resultado[1]];
                 }
-            } else {
-                error_log("DEBUG actualizarPostSimple: No hay archivo adjunto nuevo o error en upload");
             }
 
             // 3. Extraer y actualizar metadata
@@ -523,44 +519,35 @@ class RotafolioManager
             if (count($lines) >= 2) {
                 $metadata = json_decode($lines[0], true) ?: [];
                 $contenido_html = $lines[1];
-                error_log("DEBUG actualizarPostSimple: Metadata extraída: " . json_encode($metadata));
             } else {
                 $contenido_html = $contenido_actual;
-                error_log("DEBUG actualizarPostSimple: No se encontró metadata, usando contenido completo");
             }
 
             // Actualizar metadata
             $metadata['e'] = time(); // Marcar como editado
-            error_log("DEBUG actualizarPostSimple: Timestamp de edición agregado: " . $metadata['e']);
 
             // Mantener información original si existe
             if (!isset($metadata['t'])) {
                 $metadata['t'] = time();
-                error_log("DEBUG actualizarPostSimple: Timestamp original establecido: " . $metadata['t']);
             }
 
             // Actualizar información de archivos en metadata
             if (isset($archivos_procesados['imagen_header'])) {
                 $metadata['img_header'] = $archivos_procesados['imagen_header'];
-                error_log("DEBUG actualizarPostSimple: Metadata img_header actualizada: " . $archivos_procesados['imagen_header']);
             } elseif (isset($metadata['img_header'])) {
                 // Mantener la imagen existente en metadata
                 $archivos_procesados['imagen_header'] = $metadata['img_header'];
-                error_log("DEBUG actualizarPostSimple: Manteniendo imagen existente en metadata");
             }
 
             if (isset($archivos_procesados['archivo_adjunto'])) {
                 $metadata['archivo_adjunto'] = $archivos_procesados['archivo_adjunto'];
-                error_log("DEBUG actualizarPostSimple: Metadata archivo_adjunto actualizada: " . $archivos_procesados['archivo_adjunto']);
             } elseif (isset($metadata['archivo_adjunto'])) {
                 // Mantener el archivo existente en metadata
                 $archivos_procesados['archivo_adjunto'] = $metadata['archivo_adjunto'];
-                error_log("DEBUG actualizarPostSimple: Manteniendo archivo existente en metadata");
             }
 
             // 4. Construir nuevo contenido
             $nuevo_contenido = json_encode($metadata) . "\n\n" . ($datos['contenido'] ?? $contenido_html);
-            error_log("DEBUG actualizarPostSimple: Nuevo contenido construido, primeros 100 chars: " . substr($nuevo_contenido, 0, 100));
 
             // 5. Preparar datos para actualización
             $datos_actualizar = [
@@ -569,18 +556,15 @@ class RotafolioManager
 
             if (isset($datos['color'])) {
                 $datos_actualizar['color'] = $datos['color'];
-                error_log("DEBUG actualizarPostSimple: Color a actualizar: " . $datos['color']);
             }
 
             if (isset($archivos_procesados['imagen_header'])) {
                 $datos_actualizar['imagen_header'] = $archivos_procesados['imagen_header'];
-                error_log("DEBUG actualizarPostSimple: Imagen header a actualizar: " . $archivos_procesados['imagen_header']);
             }
 
             if (isset($archivos_procesados['archivo_adjunto'])) {
                 $datos_actualizar['archivo_adjunto'] = $archivos_procesados['archivo_adjunto'];
                 $datos_actualizar['url_archivo'] = $archivos_procesados['archivo_adjunto'];
-                error_log("DEBUG actualizarPostSimple: Archivo adjunto a actualizar: " . $archivos_procesados['archivo_adjunto']);
             }
 
             // 6. Ejecutar actualización
@@ -592,28 +576,22 @@ class RotafolioManager
                 if (!in_array($campo, $permitidos, true)) continue;
                 $sets[] = "$campo = ?";
                 $valores[] = $valor;
-                error_log("DEBUG actualizarPostSimple: Campo a actualizar: $campo = $valor");
             }
 
             if (!$sets) {
-                error_log("DEBUG actualizarPostSimple: No hay datos válidos para actualizar");
                 return [false, "No hay datos válidos para actualizar"];
             }
 
             $valores[] = $post_id;
             $sql = "UPDATE posts SET " . implode(', ', $sets) . " WHERE id = ?";
-            error_log("DEBUG actualizarPostSimple: SQL: " . $sql);
-            error_log("DEBUG actualizarPostSimple: Valores: " . json_encode($valores));
 
             $stmt = $this->pdo->prepare($sql);
 
             if ($stmt->execute($valores)) {
                 $rows = $stmt->rowCount();
-                error_log("DEBUG actualizarPostSimple: Actualización exitosa. Filas afectadas: " . $rows);
                 return [true, "Post actualizado correctamente", $post_id];
             } else {
                 $error_info = $stmt->errorInfo();
-                error_log("DEBUG actualizarPostSimple: Error en ejecución SQL: " . json_encode($error_info));
                 return [false, "Error al actualizar: " . ($error_info[2] ?? 'desconocido')];
             }
         } catch (PDOException $e) {
@@ -983,5 +961,294 @@ class RotafolioManager
         } catch (PDOException $e) {
             return [false, "Error al reemplazar archivo: " . $e->getMessage()];
         }
+    }
+
+    // ====== NUEVO MÉTODO: Eliminar archivo específico de un post ======
+    public function eliminarArchivoEspecifico($post_id, $tipo_archivo)
+    {
+        try {
+            // Obtener información del post
+            $stmt = $this->pdo->prepare("SELECT contenido, imagen_header, archivo_adjunto, url_archivo FROM posts WHERE id = ?");
+            $stmt->execute([$post_id]);
+            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$post) {
+                return [false, "Post no encontrado"];
+            }
+
+            // Determinar qué archivo eliminar
+            $archivo_actual = '';
+            $campo_bd = '';
+
+            if ($tipo_archivo === 'imagen_header') {
+                $archivo_actual = $post['imagen_header'];
+                $campo_bd = 'imagen_header';
+            } else {
+                $archivo_actual = $post['archivo_adjunto'] ?? $post['url_archivo'];
+                $campo_bd = 'archivo_adjunto';
+            }
+
+            // Eliminar archivo físico
+            if (!empty($archivo_actual)) {
+                $this->eliminarArchivoFisico($archivo_actual);
+            }
+
+            // Actualizar la base de datos
+            if ($tipo_archivo === 'imagen_header') {
+                $sql = "UPDATE posts SET imagen_header = NULL WHERE id = ?";
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute([$post_id]);
+            } else {
+                $sql = "UPDATE posts SET archivo_adjunto = NULL, url_archivo = NULL WHERE id = ?";
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute([$post_id]);
+            }
+
+            // Actualizar metadata en el contenido
+            $lines = explode("\n\n", $post['contenido'], 2);
+            $metadata = [];
+            $contenido_html = '';
+
+            if (count($lines) >= 2) {
+                $metadata = json_decode($lines[0], true) ?: [];
+                $contenido_html = $lines[1];
+
+                // Eliminar la referencia al archivo en metadata
+                if ($tipo_archivo === 'imagen_header') {
+                    unset($metadata['img_header']);
+                } else {
+                    unset($metadata['archivo_adjunto']);
+                }
+
+                // Reconstruir contenido con metadata actualizada
+                $nuevo_contenido = json_encode($metadata) . "\n\n" . $contenido_html;
+
+                // Actualizar contenido en la base de datos
+                $stmt = $this->pdo->prepare("UPDATE posts SET contenido = ? WHERE id = ?");
+                $stmt->execute([$nuevo_contenido, $post_id]);
+            }
+
+            return [true, "Archivo eliminado correctamente"];
+        } catch (PDOException $e) {
+            error_log("Error al eliminar archivo específico: " . $e->getMessage());
+            return [false, "Error al eliminar archivo: " . $e->getMessage()];
+        }
+    }
+}
+
+// ====== CLASES INTERNAS PARA REFACTORIZACIÓN ======
+
+class RotafolioDataManager
+{
+    private $pdo;
+
+    public function __construct($pdo)
+    {
+        $this->pdo = $pdo;
+    }
+
+    public function obtenerPostCompleto($post_id)
+    {
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT p.*, r.user_id as propietario_rotafolio, r.es_publico
+                FROM posts p
+                LEFT JOIN rotafolios r ON p.rotafolio_id = r.id
+                WHERE p.id = ?
+            ");
+            $stmt->execute([$post_id]);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Error en RotafolioDataManager: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    public function actualizarPost($post_id, $datos)
+    {
+        try {
+            $permitidos = ['contenido', 'color', 'imagen_header', 'archivo_adjunto', 'url_archivo'];
+            $sets = [];
+            $valores = [];
+
+            foreach ($datos as $campo => $valor) {
+                if (!in_array($campo, $permitidos)) continue;
+                $sets[] = "$campo = ?";
+                $valores[] = $valor;
+            }
+
+            if (empty($sets)) {
+                return false;
+            }
+
+            $valores[] = $post_id;
+            $sql = "UPDATE posts SET " . implode(', ', $sets) . " WHERE id = ?";
+
+            $stmt = $this->pdo->prepare($sql);
+            return $stmt->execute($valores);
+        } catch (PDOException $e) {
+            error_log("Error al actualizar post: " . $e->getMessage());
+            return false;
+        }
+    }
+}
+
+class RotafolioFileHandler
+{
+    private $pdo;
+    private $base_path;
+
+    public function __construct($pdo)
+    {
+        $this->pdo = $pdo;
+        $this->base_path = dirname(dirname(__FILE__));
+    }
+
+    public function eliminarArchivoPost($post_id, $tipo_archivo)
+    {
+        try {
+            $manager = new RotafolioManager($this->pdo);
+            return $manager->eliminarArchivoEspecifico($post_id, $tipo_archivo);
+        } catch (Exception $e) {
+            error_log("Error en eliminarArchivoPost: " . $e->getMessage());
+            return [false, "Error al eliminar archivo"];
+        }
+    }
+
+    public function obtenerArchivosPost($post_id)
+    {
+        try {
+            $stmt = $this->pdo->prepare("SELECT imagen_header, archivo_adjunto, url_archivo FROM posts WHERE id = ?");
+            $stmt->execute([$post_id]);
+            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$post) {
+                return [false, "Post no encontrado"];
+            }
+
+            $archivos = [
+                'imagen_header' => $post['imagen_header'],
+                'archivo_adjunto' => $post['archivo_adjunto'] ?? $post['url_archivo']
+            ];
+
+            return [true, $archivos];
+        } catch (PDOException $e) {
+            error_log("Error al obtener archivos: " . $e->getMessage());
+            return [false, "Error al obtener archivos"];
+        }
+    }
+}
+
+class RotafolioPermissions
+{
+    private $pdo;
+
+    public function __construct($pdo)
+    {
+        $this->pdo = $pdo;
+    }
+
+    public function puedeEditarPost($post_id, $usuario_id, $visitante_id = null, $es_propietario_rotafolio = false)
+    {
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT p.*, r.user_id as propietario_rotafolio 
+                FROM posts p
+                LEFT JOIN rotafolios r ON p.rotafolio_id = r.id
+                WHERE p.id = ?
+            ");
+            $stmt->execute([$post_id]);
+            $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$post) {
+                return [false, "Post no encontrado"];
+            }
+
+            // Propietario del rotafolio puede editar cualquier post
+            if ($es_propietario_rotafolio && $post['propietario_rotafolio'] == $usuario_id) {
+                return [true, "Propietario del rotafolio"];
+            }
+
+            // Extraer metadata
+            $lines = explode("\n\n", $post['contenido'], 2);
+            $metadata = [];
+
+            if (count($lines) >= 2) {
+                $metadata = json_decode($lines[0], true) ?: [];
+            }
+
+            // Verificar creador
+            if (isset($metadata['v'])) {
+                // Usuario registrado
+                if ($usuario_id > 0 && $metadata['v'] === 'p_' . $usuario_id) {
+                    return [true, "Creador del post (registrado)"];
+                }
+
+                // Visitante
+                if ($visitante_id && $metadata['v'] === $visitante_id) {
+                    return [true, "Creador del post (visitante)"];
+                }
+            }
+
+            return [false, "No tiene permisos para editar este post"];
+        } catch (PDOException $e) {
+            error_log("Error en verificación de permisos: " . $e->getMessage());
+            return [false, "Error al verificar permisos"];
+        }
+    }
+
+    public function puedeEliminarPost($post_id, $usuario_id, $visitante_id = null)
+    {
+        return $this->puedeEditarPost($post_id, $usuario_id, $visitante_id, true);
+    }
+}
+
+class RotafolioDisplay
+{
+    public static function aplicarColorPost($post, $es_propietario_rotafolio)
+    {
+        // Si no es propietario del rotafolio, usar color blanco por defecto
+        // para mantener consistencia visual del rotafolio
+        if (!$es_propietario_rotafolio && !($post['metadata']['p'] ?? false)) {
+            return '#ffffff';
+        }
+        return $post['color'] ?? '#ffffff';
+    }
+
+    public static function generarAvatar($nombre)
+    {
+        if (empty($nombre)) return '?';
+
+        $nombres = explode(' ', $nombre);
+        $iniciales = strtoupper(
+            substr($nombres[0], 0, 1) .
+                (isset($nombres[1]) ? substr($nombres[1], 0, 1) : substr($nombres[0], 1, 1))
+        );
+
+        return $iniciales;
+    }
+
+    public static function obtenerColorAvatar($nombre)
+    {
+        $colores = ['#0d6efd', '#198754', '#dc3545', '#ffc107', '#0dcaf0', '#6f42c1', '#20c997', '#fd7e14'];
+        $hash = crc32($nombre);
+        return $colores[abs($hash) % count($colores)];
+    }
+
+    public static function formatearFecha($timestamp)
+    {
+        $diferencia = time() - $timestamp;
+
+        if ($diferencia < 60) return 'Hace un momento';
+        if ($diferencia < 120) return 'Hace 1 minuto';
+        if ($diferencia < 3600) return 'Hace ' . floor($diferencia / 60) . ' minutos';
+        if ($diferencia < 7200) return 'Hace 1 hora';
+        if ($diferencia < 86400) return 'Hace ' . floor($diferencia / 3600) . ' horas';
+        if ($diferencia < 172800) return 'Ayer';
+        if ($diferencia < 2592000) return 'Hace ' . floor($diferencia / 86400) . ' días';
+        if ($diferencia < 5184000) return 'Hace 1 mes';
+        if ($diferencia < 31536000) return 'Hace ' . floor($diferencia / 2592000) . ' meses';
+
+        return date('d/m/Y', $timestamp);
     }
 }
