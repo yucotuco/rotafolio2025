@@ -33,3 +33,20 @@ El sistema está orientado a fines **educativos y colaborativos**, permitiendo l
 
 ## 📂 Estructura del proyecto
 
+📌 Estado del proyecto
+
+El proyecto se encuentra en desarrollo activo.
+Se planean mejoras en:
+
+Seguridad
+
+Optimización de código
+
+Interfaz de usuario
+
+Modularización
+
+📄 Licencia
+
+Este proyecto se distribuye bajo la Licencia MIT.
+Puedes usarlo, modificarlo y distribuirlo libremente, manteniendo el aviso de copyright.
