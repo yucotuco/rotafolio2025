@@ -367,7 +367,7 @@ function obtenerLimitesPlan($pdo)
         case 'premium':
             $limites = [
                 'max_rotafolios' => 50,
-                'max_espacio_mb' => 1024,
+                'max_espacio_mb' => 5120,
                 'max_posts' => 1000,
                 'puede_crear_plantillas' => true,
                 'puede_colaborar' => true,

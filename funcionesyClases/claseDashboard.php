@@ -45,7 +45,7 @@ class DashboardManager
                 ],
                 'premium' => [
                     'max_rotafolios' => 50,
-                    'max_espacio_mb' => 1024,
+                    'max_espacio_mb' => 5120,
                     'nombre' => 'Premium',
                     'color' => '#fd7e14'
                 ]

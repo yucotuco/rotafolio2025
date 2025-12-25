@@ -93,12 +93,18 @@ if ($usuario_logueado && $id > 0) {
 
 // ==================== SECCIÓN 4: CONTENIDO ROTAFOLIO ====================
 // CONTENIDO ROTAFOLIO
+// CONTENIDO ROTAFOLIO  Modificado
 $contenido              = null;
 $error_tipo             = '';
 $error_mensaje          = '';
 $permite_posts_publicos = false;
 $color_fondo            = '#f8f9fa';
 $imagen_fondo           = '';
+
+// AÑADIR NUEVAS VARIABLES PARA CONTROL DE ACCESO
+$acceso_permitido = true; // Por defecto permitido
+$solo_usuarios_registrados = false; // Nueva variable para control de acceso
+$modo_solo_lectura = false; // NUEVA VARIABLE PARA MODO SOLO LECTURA
 
 try {
     if ($id > 0) {
@@ -117,6 +123,18 @@ try {
             $permite_posts_publicos = (bool)($contenido['permite_posts_publicos'] ?? false);
             $color_fondo  = $contenido['color_fondo'] ?? '#f8f9fa';
             $imagen_fondo = $contenido['imagen_fondo'] ?? '';
+
+            // AÑADIR: Verificar si solo permite usuarios registrados
+            $solo_usuarios_registrados = (bool)($contenido['solo_usuarios_registrados'] ?? false);
+
+            // AÑADIR: Validar acceso según el modo (MEJORADO)
+            if ($solo_usuarios_registrados && !$usuario_logueado && !$es_propietario) {
+                // CAMBIO IMPORTANTE: Permitir acceso SOLO LECTURA
+                $acceso_permitido = true; // Cambiado de false a true
+                $modo_solo_lectura = true; // Activar modo solo lectura
+                $error_tipo = 'solo_usuarios_registrados';
+                $error_mensaje = "Este rotafolio es de acceso exclusivo para usuarios registrados. Puedes ver los posts, pero para interactuar necesitas registrarte o iniciar sesión.";
+            }
         }
     } else {
         $error_tipo    = 'sin_parametros';
@@ -154,114 +172,126 @@ $error_agregar = $error_agregar ?? '';
 
 // ==================== SECCIÓN 6: MANEJO POST NO-AJAX ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contenido && !isset($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    // ACTUALIZAR INFO (propietario)
-    if (isset($_POST['actualizar_info']) && $es_propietario) {
-        $datos_actualizar = [
-            'titulo'                 => trim($_POST['titulo'] ?? ''),
-            'descripcion'            => trim($_POST['descripcion'] ?? ''),
-            'layout'                 => 'muro',
-            'color_fondo'            => $_POST['color_fondo'] ?? '#0dcaf0',
-            'es_publico'             => isset($_POST['es_publico']) ? 1 : 0,
-            'permite_posts_publicos' => isset($_POST['permite_posts_publicos']) ? 1 : 0,
-        ];
+    // Verificar si está en modo solo lectura
+    if ($modo_solo_lectura) {
+        $error_agregar = "No tienes permiso para publicar posts. Debes registrarte o iniciar sesión.";
+        // No permitir continuar con el procesamiento
+    } else {
+        // ACTUALIZAR INFO (propietario)
+        if (isset($_POST['actualizar_info']) && $es_propietario) {
+            $datos_actualizar = [
+                'titulo'                 => trim($_POST['titulo'] ?? ''),
+                'descripcion'            => trim($_POST['descripcion'] ?? ''),
+                'layout'                 => 'muro',
+                'color_fondo'            => $_POST['color_fondo'] ?? '#0dcaf0',
+                'es_publico'             => isset($_POST['es_publico']) ? 1 : 0,
+                'permite_posts_publicos' => isset($_POST['permite_posts_publicos']) ? 1 : 0,
+                // AÑADIR NUEVO CAMPO
+                'solo_usuarios_registrados' => isset($_POST['solo_usuarios_registrados']) ? 1 : 0,
+            ];
 
-        if ($datos_actualizar['titulo'] === '') {
-            $error_agregar = "El título es requerido";
-        } else {
-            if (isset($_FILES['imagen_fondo']) && $_FILES['imagen_fondo']['error'] === UPLOAD_ERR_OK) {
-                $resultado = $rotaManager->procesarSubidaArchivo($_FILES['imagen_fondo'], 'imagen', false);
-                if ($resultado[0]) {
-                    $datos_actualizar['imagen_fondo'] = $resultado[1];
-                } else {
-                    $error_agregar = $resultado[1];
+            if ($datos_actualizar['titulo'] === '') {
+                $error_agregar = "El título es requerido";
+            } else {
+                if (isset($_FILES['imagen_fondo']) && $_FILES['imagen_fondo']['error'] === UPLOAD_ERR_OK) {
+                    $resultado = $rotaManager->procesarSubidaArchivo($_FILES['imagen_fondo'], 'imagen', false);
+                    if ($resultado[0]) {
+                        $datos_actualizar['imagen_fondo'] = $resultado[1];
+                    } else {
+                        $error_agregar = $resultado[1];
+                    }
                 }
-            }
-            if (isset($_POST['eliminar_imagen']) && $_POST['eliminar_imagen'] === '1') {
-                $datos_actualizar['imagen_fondo'] = null;
-            }
-
-            if (empty($error_agregar)) {
-                $ok = $rotaManager->actualizarRotafolio($id, $datos_actualizar);
-                if ($ok) {
-                    foreach ($datos_actualizar as $k => $v) $contenido[$k] = $v;
-                    $color_fondo            = $contenido['color_fondo'];
-                    $imagen_fondo           = $contenido['imagen_fondo'] ?? '';
-                    $permite_posts_publicos = (bool)$contenido['permite_posts_publicos'];
-
-                    header("Location: ver_rotafolio.php?id={$id}&success=1");
-                    exit;
-                } else {
-                    $error_agregar = "Error al actualizar la información: " . $rotaManager->getLastError();
+                if (isset($_POST['eliminar_imagen']) && $_POST['eliminar_imagen'] === '1') {
+                    $datos_actualizar['imagen_fondo'] = null;
                 }
-            }
-        }
-    }
 
-    // AGREGAR POST (propietario, no-AJAX)
-    if (isset($_POST['agregar_post_editor']) && $es_propietario) {
-        $contenido_post = trim($_POST['contenido_post_editor'] ?? '');
-        $color         = $_POST['color_post_editor'] ?? '#ffffff';
-
-        if ($contenido_post === '') {
-            $error_agregar = "El contenido es requerido";
-        }
-
-        if (empty($error_agregar)) {
-            $url_imagen_header = null;
-            $url_archivo_adjunto = null;
-
-            if (isset($_FILES['imagen_header']) && $_FILES['imagen_header']['error'] === UPLOAD_ERR_OK) {
-                $resultado = $rotaManager->procesarSubidaArchivo($_FILES['imagen_header'], 'imagen', false);
-                if ($resultado[0]) {
-                    $url_imagen_header = $resultado[1];
-                } else {
-                    $error_agregar = $resultado[1];
-                }
-            }
-
-            if (empty($error_agregar) && isset($_FILES['archivo_adjunto']) && $_FILES['archivo_adjunto']['error'] === UPLOAD_ERR_OK) {
-                $resultado = $rotaManager->procesarSubidaArchivo($_FILES['archivo_adjunto'], 'documento', false);
-                if ($resultado[0]) {
-                    $url_archivo_adjunto = $resultado[1];
-                } else {
-                    $error_agregar = $resultado[1];
-                }
-            }
-
-            if (empty($error_agregar)) {
-                $meta = json_encode([
-                    'v' => 'p_' . $usuario_id,
-                    'n' => $usuario_nombre ?: 'Propietario',
-                    'p' => 1,
-                    't' => time(),
-                    'img_header' => $url_imagen_header,
-                    'archivo_adjunto' => $url_archivo_adjunto,
-                    'avatar' => $usuario_avatar ?: substr($usuario_nombre, 0, 2)
-                ]);
-
-                try {
-                    $contenido_completo = $meta . "\n\n" . $contenido_post;
-
-                    // CORRECCIÓN: Solo el propietario aplica color
-                    $ok = $rotaManager->crearPost(
-                        $id,
-                        $contenido_completo,
-                        0,
-                        0,
-                        'medio',
-                        $color, // Solo propietario tiene color
-                        $url_imagen_header,
-                        $url_archivo_adjunto
-                    );
-
+                if (empty($error_agregar)) {
+                    $ok = $rotaManager->actualizarRotafolio($id, $datos_actualizar);
                     if ($ok) {
+                        foreach ($datos_actualizar as $k => $v) $contenido[$k] = $v;
+                        $color_fondo            = $contenido['color_fondo'];
+                        $imagen_fondo           = $contenido['imagen_fondo'] ?? '';
+                        $permite_posts_publicos = (bool)$contenido['permite_posts_publicos'];
+
                         header("Location: ver_rotafolio.php?id={$id}&success=1");
                         exit;
                     } else {
-                        $error_agregar = "Error al agregar el post: " . $rotaManager->getLastError();
+                        $error_agregar = "Error al actualizar la información: " . $rotaManager->getLastError();
                     }
-                } catch (Exception $e) {
-                    $error_agregar = "Error de base de datos: " . $e->getMessage();
+                }
+            }
+        }
+
+        // AGREGAR POST (propietario, no-AJAX)
+        if (isset($_POST['agregar_post_editor']) && $es_propietario) {
+            $contenido_post = trim($_POST['contenido_post_editor'] ?? '');
+            $color         = $_POST['color_post_editor'] ?? '#ffffff';
+
+            if ($contenido_post === '') {
+                $error_agregar = "El contenido es requerido";
+            }
+
+            if (empty($error_agregar)) {
+                $url_imagen_header = null;
+                $url_archivo_adjunto = null;
+
+                if (isset($_FILES['imagen_header']) && $_FILES['imagen_header']['error'] === UPLOAD_ERR_OK) {
+                    $resultado = $rotaManager->procesarSubidaArchivo($_FILES['imagen_header'], 'imagen', false);
+                    if ($resultado[0]) {
+                        $url_imagen_header = $resultado[1];
+                    } else {
+                        $error_agregar = $resultado[1];
+                    }
+                }
+
+                if (empty($error_agregar) && isset($_FILES['archivo_adjunto']) && $_FILES['archivo_adjunto']['error'] === UPLOAD_ERR_OK) {
+                    $resultado = $rotaManager->procesarSubidaArchivo($_FILES['archivo_adjunto'], 'documento', false);
+                    if ($resultado[0]) {
+                        $url_archivo_adjunto = $resultado[1];
+                    } else {
+                        $error_agregar = $resultado[1];
+                    }
+                }
+
+                if (empty($error_agregar)) {
+                    $nombre_mostrar = $usuario_nombre ?: ($es_propietario ? 'Propietario' : 'Usuario');
+                    $avatar_mostrar = $usuario_avatar ?: substr($nombre_mostrar, 0, 2);
+
+                    $meta = json_encode([
+                        'v' => 'p_' . $usuario_id,
+                        'n' => $nombre_mostrar,
+                        'p' => $es_propietario ? 1 : 0,
+                        'u' => 1, // Usuario registrado
+                        't' => time(),
+                        'img_header' => $url_imagen_header,
+                        'archivo_adjunto' => $url_archivo_adjunto,
+                        'avatar' => $avatar_mostrar
+                    ]);
+
+                    try {
+                        $contenido_completo = $meta . "\n\n" . $contenido_post;
+
+                        // CORRECCIÓN: Solo el propietario aplica color
+                        $ok = $rotaManager->crearPost(
+                            $id,
+                            $contenido_completo,
+                            0,
+                            0,
+                            'medio',
+                            $color, // Solo propietario tiene color
+                            $url_imagen_header,
+                            $url_archivo_adjunto
+                        );
+
+                        if ($ok) {
+                            header("Location: ver_rotafolio.php?id={$id}&success=1");
+                            exit;
+                        } else {
+                            $error_agregar = "Error al agregar el post: " . $rotaManager->getLastError();
+                        }
+                    } catch (Exception $e) {
+                        $error_agregar = "Error de base de datos: " . $e->getMessage();
+                    }
                 }
             }
         }
@@ -272,7 +302,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $contenido && !isset($_SERVER['HTTP
 $posts    = [];
 $mis_posts = [];
 
-if ($contenido) {
+if ($contenido && $acceso_permitido) {  // AÑADIR CONDICIÓN
     try {
         $stmt = $pdoRota->prepare("SELECT * FROM posts WHERE rotafolio_id = ? ORDER BY fecha_creacion DESC");
         $stmt->execute([$id]);
@@ -301,9 +331,18 @@ if ($contenido) {
                     );
                 }
 
-                if ($post['es_propietario'] && $es_propietario)       $post['nombre_display'] = 'Tú (Propietario)';
-                elseif ($post['es_mio'] && !$es_propietario)          $post['nombre_display'] = 'Tú';
+                // Determinar cómo mostrar el nombre del autor
+                // Mantener el nombre original del metadata
+                $post['nombre_display'] = $metadata['n'] ?? 'Anónimo';
 
+                // Solo sobrescribir si es el usuario actual
+                if (isset($metadata['v'])) {
+                    if ($metadata['v'] === 'p_' . $usuario_id && $usuario_id > 0) {
+                        $post['nombre_display'] = $es_propietario ? 'Tú (Propietario)' : 'Tú';
+                    } elseif ($metadata['v'] === $visitante_id) {
+                        $post['nombre_display'] = 'Tú';
+                    }
+                }
                 $post['imagen_header'] = $metadata['img_header'] ?? $post['imagen_header'] ?? null;
                 $post['archivo_adjunto'] = $metadata['archivo_adjunto'] ?? $post['archivo_adjunto'] ?? $post['url_archivo'] ?? null;
             } else {
@@ -360,9 +399,24 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
 }
 
 // ==================== SECCIÓN 9: MANEJADORES AJAX ====================
+// ==================== SECCIÓN 9: MANEJADORES AJAX ====================
 $isAjaxRequest = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
+    // MODIFICAR LA VALIDACIÓN PARA MODO SOLO LECTURA
+    if ($solo_usuarios_registrados && !$usuario_logueado && !$es_propietario) {
+        // Si es modo solo lectura, permitir algunas acciones pero no crear posts
+        if (isset($_POST['agregar_post_publico']) || isset($_POST['agregar_post_editor'])) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => false,
+                'message' => 'Debes registrarte o iniciar sesión para publicar posts en este rotafolio.'
+            ]);
+            exit;
+        }
+        // Permitir otras acciones AJAX (como obtener datos)
+    }
+
     // AGREGAR POST
     if ((isset($_POST['agregar_post_publico']) || isset($_POST['agregar_post_editor'])) && ($permite_posts_publicos || $es_propietario)) {
         $response    = ['success' => false, 'message' => '', 'html' => '', 'post_id' => 0];
@@ -411,19 +465,38 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
             }
         }
 
-        // nombre visitante
+        // nombre del autor
         if ($es_propietario) {
-            $nombre_visitante = $usuario_nombre ?: 'Propietario';
-            $avatar = $usuario_avatar ?: substr($nombre_visitante, 0, 2);
+            $nombre_autor = $usuario_nombre ?: 'Propietario';
+            $avatar = $usuario_avatar ?: substr($nombre_autor, 0, 2);
+        } elseif ($usuario_logueado) {
+            // Usuario registrado (no propietario del rotafolio)
+            $nombre_autor = $usuario_nombre ?: 'Usuario';
+            $avatar = $usuario_avatar ?: substr($nombre_autor, 0, 2);
         } else {
-            $nombre_visitante = trim($_POST['nombre_visitante'] ?? 'Anónimo');
-            $avatar = substr($nombre_visitante, 0, 2);
+            // Visitante (no registrado) - SOLO SI ESTÁ PERMITIDO
+            if (!$permite_posts_publicos) {
+                $response['message'] = "No tienes permiso para publicar posts en este rotafolio";
+                header('Content-Type: application/json');
+                echo json_encode($response);
+                exit;
+            }
+
+            $nombre_autor = trim($_POST['nombre_visitante'] ?? '');
+            $avatar = substr($nombre_autor, 0, 2);
+
+            // Si no ingresó nombre, usar "Anónimo"
+            if (empty($nombre_autor)) {
+                $nombre_autor = 'Anónimo';
+                $avatar = 'A?';
+            }
         }
 
         $meta = json_encode([
-            'v' => $es_propietario ? ('p_' . $usuario_id) : $visitante_id,
-            'n' => $nombre_visitante,
+            'v' => ($es_propietario || $usuario_logueado) ? ('p_' . $usuario_id) : $visitante_id,
+            'n' => $nombre_autor,
             'p' => $es_propietario ? 1 : 0,
+            'u' => $usuario_logueado ? 1 : 0, // Flag para usuario registrado
             't' => time(),
             'img_header' => $url_imagen_header,
             'archivo_adjunto' => $url_archivo_adjunto,
@@ -526,6 +599,176 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
             }
         } else {
             $response['message'] = "ID de post no válido";
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        exit;
+    }
+
+    // ====== ACTUALIZAR POST (EDITAR) ======
+    if (isset($_POST['actualizar_post'])) {
+        $response = ['success' => false, 'message' => ''];
+        $post_id = (int)($_POST['post_id'] ?? 0);
+        $contenido_p = trim($_POST['contenido'] ?? '');
+        $color = $_POST['color'] ?? '#ffffff';
+
+        if (!$post_id) {
+            $response['message'] = "ID de post no válido";
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        if (empty($contenido_p)) {
+            $response['message'] = "El contenido es requerido";
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        // Obtener post para verificar permisos
+        $stmt = $pdoRota->prepare("SELECT contenido, rotafolio_id FROM posts WHERE id = ?");
+        $stmt->execute([$post_id]);
+        $post = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$post) {
+            $response['message'] = "Post no encontrado";
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        $rotafolio_id_post = $post['rotafolio_id'];
+
+        // Verificar permisos
+        $permiso_concedido = false;
+        $lines = explode("\n\n", $post['contenido'], 2);
+        $metadata = [];
+
+        if (count($lines) >= 2) {
+            $metadata = json_decode($lines[0], true) ?: [];
+        }
+
+        if ($es_propietario) {
+            // Propietario siempre tiene permiso
+            $permiso_concedido = true;
+        } else {
+            // Verificar si el usuario es el creador del post
+            if (isset($metadata['v'])) {
+                if ($usuario_logueado) {
+                    $permiso_concedido = ($metadata['v'] === 'p_' . $usuario_id);
+                } else {
+                    $permiso_concedido = ($metadata['v'] === $visitante_id);
+                }
+            }
+
+            // También verificar si está en mis_posts
+            if (!$permiso_concedido && in_array($post_id, $mis_posts)) {
+                $permiso_concedido = true;
+            }
+        }
+
+        if (!$permiso_concedido) {
+            $response['message'] = "No tienes permiso para editar este post";
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        try {
+            // Actualizar metadata con timestamp de edición
+            $metadata['e'] = time(); // Marcar como editado
+
+            // Reconstruir contenido con metadata actualizada
+            $nuevo_contenido = json_encode($metadata) . "\n\n" . $contenido_p;
+
+            // Procesar nuevos archivos
+            $url_imagen_header = $metadata['img_header'] ?? null;
+            $url_archivo_adjunto = $metadata['archivo_adjunto'] ?? null;
+
+            // Si se sube nueva imagen
+            if (isset($_FILES['imagen_header_edit']) && $_FILES['imagen_header_edit']['error'] === UPLOAD_ERR_OK) {
+                $resultado = $rotaManager->procesarSubidaArchivo($_FILES['imagen_header_edit'], 'imagen', !$es_propietario);
+                if ($resultado[0]) {
+                    $url_imagen_header = $resultado[1];
+                } else {
+                    $response['message'] = $resultado[1];
+                    header('Content-Type: application/json');
+                    echo json_encode($response);
+                    exit;
+                }
+            }
+
+            // Si se sube nuevo archivo
+            if (isset($_FILES['archivo_adjunto_edit']) && $_FILES['archivo_adjunto_edit']['error'] === UPLOAD_ERR_OK) {
+                $resultado = $rotaManager->procesarSubidaArchivo($_FILES['archivo_adjunto_edit'], 'documento', !$es_propietario);
+                if ($resultado[0]) {
+                    $url_archivo_adjunto = $resultado[1];
+                } else {
+                    $response['message'] = $resultado[1];
+                    header('Content-Type: application/json');
+                    echo json_encode($response);
+                    exit;
+                }
+            }
+
+            // Actualizar metadata con URLs de archivos
+            if ($url_imagen_header) $metadata['img_header'] = $url_imagen_header;
+            if ($url_archivo_adjunto) $metadata['archivo_adjunto'] = $url_archivo_adjunto;
+
+            // Reconstruir contenido final
+            $nuevo_contenido = json_encode($metadata) . "\n\n" . $contenido_p;
+
+            // Actualizar en base de datos
+            $stmt = $pdoRota->prepare("UPDATE posts SET contenido = ?, color = ?, imagen_header = ?, archivo_adjunto = ? WHERE id = ?");
+            $success = $stmt->execute([
+                $nuevo_contenido,
+                $color,
+                $url_imagen_header,
+                $url_archivo_adjunto,
+                $post_id
+            ]);
+
+
+            if ($success) {
+                $response['success'] = true;
+                $response['message'] = "Post actualizado correctamente";
+
+                // Si es necesario, obtener el post actualizado para renderizar
+                $stmt = $pdoRota->prepare("SELECT * FROM posts WHERE id = ?");
+                $stmt->execute([$post_id]);
+                $p = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($p) {
+                    $lines = explode("\n\n", $p['contenido'], 2);
+                    if (count($lines) >= 2) {
+                        $m = json_decode($lines[0], true) ?: [];
+                        $p['contenido_limpio'] = $lines[1];
+                        $p['metadata'] = $m;
+                        $p['imagen_header'] = $m['img_header'] ?? null;
+                        $p['archivo_adjunto'] = $m['archivo_adjunto'] ?? null;
+                        $p['avatar'] = $m['avatar'] ?? substr($m['n'] ?? 'A', 0, 2);
+                    }
+
+                    // Ajustar rutas
+                    if (!empty($p['archivo_adjunto'])) {
+                        $p['archivo_adjunto'] = (strpos($p['archivo_adjunto'], 'uploads/') === 0)
+                            ? '../' . $p['archivo_adjunto']
+                            : $p['archivo_adjunto'];
+                    }
+                    if (!empty($p['imagen_header'])) {
+                        $p['imagen_header'] = (strpos($p['imagen_header'], 'uploads/') === 0)
+                            ? '../' . $p['imagen_header']
+                            : $p['imagen_header'];
+                    }
+
+                    $response['html'] = renderPostCard($p, $base_path);
+                }
+            } else {
+                $response['message'] = "Error al actualizar el post en la base de datos";
+            }
+        } catch (Exception $e) {
+            $response['message'] = "Error de base de datos: " . $e->getMessage();
         }
 
         header('Content-Type: application/json');
@@ -710,7 +953,6 @@ if ($isAjaxRequest && $_SERVER['REQUEST_METHOD'] === 'POST' && $contenido) {
     echo json_encode(['success' => false, 'message' => 'Solicitud no reconocida']);
     exit;
 }
-
 // ==================== SECCIÓN 10: FUNCIONES DE RENDERIZADO ====================
 // FUNCIONES DE RENDERIZADO
 function getTipoIcon($tipo)
@@ -767,6 +1009,34 @@ function limitarPalabrasHTML($html, $limite = 200)
     return $result ?: implode(' ', array_slice($palabras, 0, $limite)) . '...';
 }
 
+// Función para obtener nombre de autor formateado (MÁS SIMPLE)
+function obtenerNombreAutorFormateado($metadata, $es_propietario_actual = false, $es_mio = false, $visitante_id_actual = '')
+{
+    global $usuario_id;
+
+    $nombre_raw = $metadata['n'] ?? 'Anónimo';
+
+    // 1. Verificar si es el usuario actual
+    if (isset($metadata['v'])) {
+        if ($metadata['v'] === 'p_' . $usuario_id && $usuario_id > 0) {
+            return $es_propietario_actual ? 'Tú (Propietario)' : 'Tú';
+        }
+
+        // Para invitados, verificar si es el mismo visitante
+        if ($visitante_id_actual && $metadata['v'] === $visitante_id_actual) {
+            return 'Tú';
+        }
+    }
+
+    // 2. Verificar si es propietario del rotafolio
+    if (isset($metadata['p']) && $metadata['p'] == 1) {
+        return $es_propietario_actual ? 'Tú (Propietario)' : 'Propietario';
+    }
+
+    // 3. Devolver el nombre tal cual (ya sea nombre personalizado o "Anónimo")
+    return htmlspecialchars($nombre_raw);
+}
+
 function renderPostsGrid($posts, $base_path)
 {
     // Usamos la clase masonry-container definida en el CSS
@@ -779,6 +1049,8 @@ function renderPostsGrid($posts, $base_path)
     $out .= '</div>';
     return $out;
 }
+
+
 
 function tiempoRelativo($timestamp)
 {
@@ -808,14 +1080,22 @@ function getColorAvatar($nombre)
 function renderPostCard($post, $base_path)
 {
     // Agregar estas variables globales
-    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id;
+    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id, $modo_solo_lectura;
 
     $postId     = (int)$post['id'];
     $color      = $post['color'] ?? '#ffffff';
     $contenido  = $post['contenido_limpio'] ?? $post['contenido'] ?? '';
     $imagen_header = $post['imagen_header'] ?? null;
     $archivo_adjunto = $post['archivo_adjunto'] ?? null;
-    $nombre_autor = $post['nombre_display'] ?? 'Anónimo';
+
+    // Obtener nombre formateado
+    global $es_propietario, $usuario_id, $visitante_id;
+    $nombre_autor = obtenerNombreAutorFormateado(
+        $post['metadata'] ?? [],
+        ($post['es_propietario'] ?? false) && $es_propietario,
+        $post['es_mio'] ?? false,
+        $visitante_id
+    );
     $avatar = $post['avatar'] ?? '?';
 
 
@@ -835,44 +1115,49 @@ function renderPostCard($post, $base_path)
         $contenido_limitado = limitarPalabrasHTML($contenido, 250);
     }
 
-    // Permisos - SECCIÓN A MODIFICAR (PUNTO 1)
+    // Permisos - MODIFICADO PARA MODO SOLO LECTURA
+    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id, $modo_solo_lectura;
 
-    global $es_propietario, $usuario_logueado, $usuario_id, $visitante_id;
-
-    // INICIO MODIFICACIÓN PUNTO 1
-    // Usuarios registrados: pueden editar/eliminar solo sus propios posts
-    // Invitados: solo pueden eliminar sus posts (no editar)
-    // Propietario del rotafolio: puede editar/eliminar todos los posts
-
-
-    $post_creado_por_usuario = false;
-    if (isset($post['metadata']['v'])) {
-        if ($usuario_logueado) {
-            // Usuario registrado: verificar si el post tiene 'p_' + user_id
-            // O si fue creado por el mismo visitante (cuando era invitado)
-            $post_creado_por_usuario = ($post['metadata']['v'] === 'p_' . $usuario_id) ||
-                ($post['metadata']['v'] === $visitante_id);
-        } else {
-            // Invitado: verificar si el post tiene su visitante_id
-            $post_creado_por_usuario = ($post['metadata']['v'] === $visitante_id);
-        }
-    }
-
-    if ($es_propietario) {
-        // Propietario del rotafolio puede hacer todo
-        $puede_editar = true;
-        $puede_eliminar = true;
-    } elseif ($usuario_logueado) {
-        // Usuario registrado (no propietario)
-        // Puede editar y eliminar solo sus propios posts
-        $puede_editar = $post_creado_por_usuario;
-        $puede_eliminar = $post_creado_por_usuario;
+    // MODIFICACIÓN PARA MODO SOLO LECTURA
+    if ($modo_solo_lectura) {
+        // En modo solo lectura, nadie puede editar/eliminar (excepto propietario)
+        $puede_editar = false;
+        $puede_eliminar = false;
     } else {
-        // Usuario invitado
-        $puede_editar = false; // Invitados NO pueden editar
-        $puede_eliminar = $post_creado_por_usuario; // Solo eliminar sus posts
+        // INICIO MODIFICACIÓN PUNTO 1
+        // Usuarios registrados: pueden editar/eliminar solo sus propios posts
+        // Invitados: solo pueden eliminar sus posts (no editar)
+        // Propietario del rotafolio: puede editar/eliminar todos los posts
+
+        $post_creado_por_usuario = false;
+        if (isset($post['metadata']['v'])) {
+            if ($usuario_logueado) {
+                // Usuario registrado: verificar si el post tiene 'p_' + user_id
+                // O si fue creado por el mismo visitante (cuando era invitado)
+                $post_creado_por_usuario = ($post['metadata']['v'] === 'p_' . $usuario_id) ||
+                    ($post['metadata']['v'] === $visitante_id);
+            } else {
+                // Invitado: verificar si el post tiene su visitante_id
+                $post_creado_por_usuario = ($post['metadata']['v'] === $visitante_id);
+            }
+        }
+
+        if ($es_propietario) {
+            // Propietario del rotafolio puede hacer todo
+            $puede_editar = true;
+            $puede_eliminar = true;
+        } elseif ($usuario_logueado) {
+            // Usuario registrado (no propietario)
+            // Puede editar y eliminar solo sus propios posts
+            $puede_editar = $post_creado_por_usuario;
+            $puede_eliminar = $post_creado_por_usuario;
+        } else {
+            // Usuario invitado
+            $puede_editar = false; // Invitados NO pueden editar
+            $puede_eliminar = $post_creado_por_usuario; // Solo eliminar sus posts
+        }
+        // FIN MODIFICACIÓN PUNTO 1
     }
-    // FIN MODIFICACIÓN PUNTO 1
 
     // Color de avatar consistente
     $color_avatar = getColorAvatar($nombre_autor);
@@ -917,7 +1202,7 @@ function renderPostCard($post, $base_path)
     if ($post['editado'] ?? false) {
         $card .= '<span class="badge bg-dark bg-opacity-10 text-dark me-1" style="font-size:0.6rem;" title="Editado el ' . date('d/m/Y H:i', $post['metadata']['e']) . '">Editado</span>';
     }
-    if ($puede_eliminar || $puede_editar) {
+    if (!$modo_solo_lectura && ($puede_eliminar || $puede_editar)) {
         $card .= '<div class="dropdown">';
         $card .= '<button class="btn btn-sm btn-link text-secondary p-0" type="button" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>';
         $card .= '<ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">';
@@ -982,6 +1267,82 @@ function renderPostCard($post, $base_path)
 }
 // Fin de renderPostCard
 
+// ==================== FUNCIÓN PARA GENERAR DETALLES DEL ROTAFOLIO ====================
+function generarDetallesRotafolio($contenido, $posts, $mis_posts, $permite_posts_publicos, $es_propietario)
+{
+    $html = '';
+
+    // Estadísticas
+    $html .= '<div class="d-flex flex-wrap gap-2 mb-3">';
+    $html .= '<span class="stats-badge">';
+    $html .= '<i class="bi bi-eye-fill text-primary"></i>';
+    $html .= ($contenido['vistas'] ?? 0) . ' vistas';
+    $html .= '</span>';
+
+    $html .= '<span class="stats-badge">';
+    $html .= '<i class="bi bi-sticky text-success"></i>';
+    $html .= '<span id="totalPostsCount">' . count($posts) . '</span> posts';
+    $html .= '</span>';
+
+    if ($permite_posts_publicos && !$es_propietario) {
+        $html .= '<span class="stats-badge bg-info bg-opacity-10 text-info border-info">';
+        $html .= '<i class="bi bi-people-fill"></i>';
+        $html .= '<span id="misPostsCount">' . count($mis_posts) . '</span> tus posts';
+        $html .= '</span>';
+    }
+
+    if ($es_propietario) {
+        $html .= '<span class="stats-badge bg-warning bg-opacity-10 text-warning border-warning">';
+        $html .= '<i class="bi bi-star-fill"></i> Propietario';
+        $html .= '</span>';
+
+        if ($contenido['es_publico']) {
+            $html .= '<span class="stats-badge bg-success bg-opacity-10 text-success border-success">';
+            $html .= '<i class="bi bi-globe"></i> Público';
+            $html .= '</span>';
+        } else {
+            $html .= '<span class="stats-badge bg-secondary bg-opacity-10 text-secondary border-secondary">';
+            $html .= '<i class="bi bi-lock"></i> Privado';
+            $html .= '</span>';
+        }
+    }
+    $html .= '</div>';
+
+    // Fecha de creación
+    if (!empty($contenido['fecha_creacion'])) {
+        $html .= '<div class="mb-2">';
+        $html .= '<small class="text-muted">';
+        $html .= '<i class="bi bi-calendar3 me-1"></i>';
+        $html .= 'Creado: ' . date('d/m/Y', strtotime($contenido['fecha_creacion']));
+
+        if (!empty($contenido['fecha_actualizacion']) && $contenido['fecha_actualizacion'] != $contenido['fecha_creacion']) {
+            $html .= ' • Actualizado: ' . date('d/m/Y', strtotime($contenido['fecha_actualizacion']));
+        }
+        $html .= '</small>';
+        $html .= '</div>';
+    }
+
+    // Información adicional (solo para propietario)
+    if ($es_propietario) {
+        $html .= '<div class="mt-3 pt-3 border-top border-light">';
+        $html .= '<h6 class="small fw-bold mb-2">Información de administración:</h6>';
+        $html .= '<div class="row g-2 small">';
+        $html .= '<div class="col-6">';
+        $html .= '<div class="text-muted">ID del rotafolio:</div>';
+        $html .= '<div class="fw-medium">#' . ($contenido['id'] ?? 'N/A') . '</div>';
+        $html .= '</div>';
+        $html .= '<div class="col-6">';
+        $html .= '<div class="text-muted">URL única:</div>';
+        $html .= '<div class="fw-medium text-truncate" style="font-size: 0.8rem;">' .
+            htmlspecialchars($contenido['url_compartir'] ?? 'N/A') . '</div>';
+        $html .= '</div>';
+        $html .= '</div>';
+        $html .= '</div>';
+    }
+
+    return $html;
+}
+
 // ==================== SECCIÓN 11: HTML Y CSS ====================
 ?>
 <!DOCTYPE html>
@@ -1021,49 +1382,69 @@ function renderPostCard($post, $base_path)
             color: #333;
         }
 
-        /* Header mejorado */
+        /* Header mejorado - MÁS EFICIENTE */
         .page-header {
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 249, 250, 0.95) 100%);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 249, 250, 0.98) 100%);
             border-radius: 16px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border: 1px solid rgba(0, 0, 0, 0.03);
+            transition: all 0.3s ease;
+        }
+
+        .header-compact {
+            padding: 1rem;
+            border-radius: 12px;
         }
 
         .page-title {
             color: #2c3e50;
             font-weight: 700;
-            margin-bottom: 0.5rem;
-            font-size: 2.2rem;
+            margin-bottom: 0.25rem;
+            font-size: 1.8rem;
             line-height: 1.2;
-        }
-
-        .page-subtitle {
-            color: #6c757d;
-            font-size: 1.1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        /* Barra de usuario mejorada */
-        .user-bar {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
-            border-radius: 50px;
-            padding: 0.75rem 1.5rem;
-            box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(0, 0, 0, 0.08);
-        }
-
-        .user-info {
             display: flex;
             align-items: center;
             gap: 0.75rem;
         }
 
+        .page-title i {
+            color: var(--color-principal);
+            font-size: 1.5rem;
+        }
+
+        .page-subtitle {
+            color: #6c757d;
+            font-size: 0.95rem;
+            margin-bottom: 0;
+            line-height: 1.4;
+            max-width: 800px;
+        }
+
+        /* Barra de usuario mejorada */
+        .user-bar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 0.5rem 1rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
         .user-avatar {
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             background: linear-gradient(135deg, var(--color-principal) 0%, #0d6efd 100%);
             border-radius: 50%;
             display: flex;
@@ -1071,34 +1452,35 @@ function renderPostCard($post, $base_path)
             justify-content: center;
             color: white;
             font-weight: 600;
-            font-size: 1rem;
+            font-size: 0.9rem;
             flex-shrink: 0;
         }
 
         .user-name {
             font-weight: 500;
             color: #2c3e50;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
         }
 
         .logout-btn {
             background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
             color: white;
             border: none;
-            border-radius: 25px;
-            padding: 0.5rem 1.25rem;
+            border-radius: 20px;
+            padding: 0.4rem 0.9rem;
             font-weight: 500;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             transition: all 0.3s ease;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.4rem;
             text-decoration: none;
+            flex-shrink: 0;
         }
 
         .logout-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.25);
             color: white;
             text-decoration: none;
         }
@@ -1113,12 +1495,11 @@ function renderPostCard($post, $base_path)
             height: 100%;
             display: flex;
             flex-direction: column;
-            min-height: 300px;
         }
 
         .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
         }
 
         .post-header-image {
@@ -1127,26 +1508,18 @@ function renderPostCard($post, $base_path)
             width: 100%;
         }
 
-        .post-header-placeholder {
-            height: 180px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-        }
-
         .card-body {
             flex: 1;
-            padding: 1.25rem;
+            padding: 1rem;
         }
 
         /* Estilos modificados para contenido de posts */
         .post-content {
             word-wrap: break-word;
             overflow-wrap: break-word;
-            line-height: 1.6;
+            line-height: 1.5;
             flex-grow: 1;
+            font-size: 0.95rem;
         }
 
         .post-content img {
@@ -1156,30 +1529,9 @@ function renderPostCard($post, $base_path)
             margin: 0.5rem 0;
         }
 
-        .post-content p {
-            margin-bottom: 0.75rem;
-        }
-
-        .post-content ul,
-        .post-content ol {
-            padding-left: 1.5rem;
-            margin-bottom: 0.75rem;
-        }
-
-        .post-content h1,
-        .post-content h2,
-        .post-content h3,
-        .post-content h4,
-        .post-content h5,
-        .post-content h6 {
-            margin-top: 1rem;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-        }
-
         /* Clase para contenido largo - con scroll limitado */
         .post-contenido-largo .contenido-limitado {
-            max-height: 300px;
+            max-height: 250px;
             overflow-y: auto;
             padding-right: 5px;
         }
@@ -1199,409 +1551,31 @@ function renderPostCard($post, $base_path)
             border-radius: 3px;
         }
 
-        .post-contenido-largo .contenido-limitado::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 0, 0, 0.3);
-        }
-
-        /* Estilos para el botón "Ver más" */
-        .ver-mas-btn {
-            font-size: 0.8rem;
-            padding: 0.25rem 0.75rem;
-        }
-
-        .ver-mas-btn:hover {
-            transform: translateY(-1px);
-        }
-
-        /* Eliminar la fecha del footer */
-        .card-footer {
-            display: none !important;
-        }
-
-        /* Mejorar la visualización de tablas dentro del contenido */
-        .post-content table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0;
-            font-size: 0.9rem;
-        }
-
-        .post-content table th,
-        .post-content table td {
-            padding: 0.5rem;
-            border: 1px solid #dee2e6;
-            text-align: left;
-        }
-
-        .post-content table th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-        }
-
-        /* Mejorar bloques de código */
-        .post-content pre {
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            padding: 1rem;
-            overflow-x: auto;
-            margin: 1rem 0;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-
-        .post-content code {
-            background-color: #f8f9fa;
-            padding: 0.2rem 0.4rem;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-
-        /* Botones de acción */
-        .btn-group-sm .btn {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.875rem;
-        }
-
-        /* Badges mejorados */
-        .badge {
-            padding: 0.35em 0.65em;
-            font-weight: 500;
-            border-radius: 6px;
-        }
-
-        /* Modal mejorado */
-        .modal-content {
-            border: none;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-        }
-
-        .modal-header {
-            background: linear-gradient(135deg, var(--color-principal) 0%, #0d6efd 100%);
-            color: white;
-            border: none;
-            padding: 1.5rem;
-        }
-
-        .modal-body {
-            padding: 1.5rem;
-        }
-
-        /* Formularios mejorados */
-        .form-control,
-        .form-select {
-            border-radius: 8px;
-            border: 1px solid #dee2e6;
-            padding: 0.75rem 1rem;
-            font-size: 0.95rem;
-            transition: all 0.3s;
-        }
-
-        .form-control:focus,
-        .form-select:focus {
-            border-color: var(--color-principal);
-            box-shadow: 0 0 0 0.25rem rgba(13, 202, 240, 0.25);
-        }
-
-        .form-label {
-            font-weight: 500;
-            color: #495057;
-            margin-bottom: 0.5rem;
-        }
-
-        /* Editor TinyMCE */
-        .tox-tinymce {
-            border-radius: 8px !important;
-            border: 1px solid #dee2e6 !important;
-            margin-bottom: 1rem;
-        }
-
-        /* Grid responsivo */
-        .row {
-            margin-bottom: 2rem;
-        }
-
-        .col {
-            margin-bottom: 1.5rem;
-        }
-
         /* Botón flotante */
         .floating-btn {
             position: fixed;
-            bottom: 30px;
-            right: 30px;
-            width: 60px;
-            height: 60px;
+            bottom: 25px;
+            right: 25px;
+            width: 56px;
+            height: 56px;
             border-radius: 50%;
             background: linear-gradient(135deg, var(--color-principal) 0%, #0d6efd 100%);
             color: white;
             border: none;
-            box-shadow: 0 4px 20px rgba(13, 202, 240, 0.4);
+            box-shadow: 0 4px 16px rgba(13, 202, 240, 0.3);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             z-index: 1000;
             transition: all 0.3s ease;
         }
 
         .floating-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 6px 25px rgba(13, 202, 240, 0.5);
+            transform: scale(1.1) translateY(-2px);
+            box-shadow: 0 6px 20px rgba(13, 202, 240, 0.4);
         }
 
-        /* Ajustes responsive para contenido */
-        @media (max-width: 768px) {
-            .post-contenido-largo .contenido-limitado {
-                max-height: 250px;
-            }
-
-            .post-content {
-                font-size: 0.95rem;
-            }
-
-            .page-header {
-                padding: 1.5rem;
-                margin-bottom: 1.5rem;
-            }
-
-            .page-title {
-                font-size: 1.8rem;
-            }
-
-            .user-bar {
-                padding: 0.5rem 1rem;
-                flex-direction: column;
-                gap: 0.75rem;
-                border-radius: 12px;
-            }
-
-            .user-info {
-                width: 100%;
-                justify-content: space-between;
-            }
-
-            .logout-btn {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .floating-btn {
-                bottom: 20px;
-                right: 20px;
-                width: 50px;
-                height: 50px;
-            }
-
-            .post-header-image,
-            .post-header-placeholder {
-                height: 150px;
-            }
-        }
-
-        @media (max-width: 576px) {
-            .post-contenido-largo .contenido-limitado {
-                max-height: 200px;
-            }
-
-            .post-content {
-                font-size: 0.9rem;
-                line-height: 1.5;
-            }
-
-            .page-title {
-                font-size: 1.5rem;
-            }
-
-            .modal-dialog {
-                margin: 0.5rem;
-            }
-
-            .btn-group-sm .btn {
-                padding: 0.2rem 0.4rem;
-                font-size: 0.8rem;
-            }
-        }
-
-        /* Animaciones */
-        .fade-in {
-            animation: fadeIn 0.5s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        /* Scrollbar personalizada */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--color-principal);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #0aa2c0;
-        }
-
-        /* Color options mejorados */
-        .color-option {
-            width: 36px;
-            height: 36px;
-            cursor: pointer;
-            border: 3px solid transparent;
-            border-radius: 8px;
-            transition: all 0.2s;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .color-option:hover {
-            transform: scale(1.15);
-            border-color: #666;
-        }
-
-        .color-option.selected {
-            border-color: #0d6efd;
-            transform: scale(1.15);
-            box-shadow: 0 4px 8px rgba(13, 110, 253, 0.3);
-        }
-
-        /* Alertas mejoradas */
-        .alert {
-            border-radius: 10px;
-            border: none;
-            padding: 1rem 1.25rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-        }
-
-        /* Contadores */
-        .stats-badge {
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 20px;
-            padding: 0.5rem 1rem;
-            font-size: 0.875rem;
-            color: #495057;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 4rem 2rem;
-            color: #6c757d;
-        }
-
-        .empty-state-icon {
-            font-size: 4rem;
-            margin-bottom: 1.5rem;
-            opacity: 0.5;
-        }
-
-        /* File preview */
-        .file-preview {
-            border: 2px dashed #dee2e6;
-            border-radius: 12px;
-            padding: 2rem;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            background: #f8f9fa;
-        }
-
-        .file-preview:hover {
-            border-color: var(--color-principal);
-            background: rgba(13, 202, 240, 0.05);
-        }
-
-        .file-preview.has-file {
-            border-style: solid;
-            background: white;
-        }
-
-        /* Info de archivos actuales */
-        .current-file-info {
-            background: #e9ecef;
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 10px;
-            font-size: 0.9rem;
-        }
-
-        .current-file-info img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 4px;
-            margin-top: 5px;
-        }
-
-        /* Spinner para carga */
-        .loading-spinner {
-            display: inline-block;
-            width: 1rem;
-            height: 1rem;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Para posts con poco contenido, altura automática */
-        .card-content:not(:has(> :nth-child(10))) {
-            max-height: none;
-            overflow-y: visible;
-        }
-
-        /* Mejorar scroll en móviles */
-        @media (max-width: 768px) {
-            .file-preview {
-                min-height: 120px;
-                padding: 1.5rem !important;
-            }
-        }
-
-        /* Para tablas dentro del contenido */
-        .card-content table {
-            max-width: 100%;
-            overflow-x: auto;
-            display: block;
-        }
-    </style>
-
-    <style>
         /* --- ESTILO MASONRY (Tipo Padlet) --- */
         .masonry-container {
             column-count: 1;
@@ -1635,51 +1609,289 @@ function renderPostCard($post, $base_path)
             margin-bottom: 1.5rem;
         }
 
-        /* --- AJUSTES DE LA TARJETA --- */
-        .card {
-            height: auto !important;
-            min-height: 0 !important;
+        /* Botones de acción compactos */
+        .action-buttons {
             display: flex;
-            flex-direction: column;
-            border: none;
-            border-radius: 16px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            transition: transform 0.2s, box-shadow 0.2s;
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
-        .card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
-            z-index: 2;
-        }
-
-        /* Ajuste fino para el header de la tarjeta */
-        .card-header-custom {
-            padding-bottom: 0.5rem;
-            margin-bottom: 0.5rem;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-        }
-
-        /* Estilos para botón de eliminar imagen (PUNTO 2) */
-        .card-img-top.position-relative .btn-danger {
-            opacity: 0.8;
-            transition: opacity 0.3s;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
+        .btn-action {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.85rem;
+            border-radius: 8px;
             display: flex;
             align-items: center;
-            justify-content: center;
-            padding: 0;
+            gap: 0.4rem;
+            transition: all 0.2s ease;
         }
 
-        .card-img-top.position-relative .btn-danger:hover {
-            opacity: 1;
+        .btn-action:hover {
+            transform: translateY(-1px);
+        }
+
+        /* Badges compactos */
+        .stats-badge {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 16px;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.8rem;
+            color: #495057;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-right: 0.4rem;
+            margin-bottom: 0.4rem;
+        }
+
+        /* Header details compacto */
+        .header-details {
+            background: rgba(248, 249, 250, 0.9);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-top: 1rem;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+            animation: fadeInSlide 0.3s ease-out;
+        }
+
+        @keyframes fadeInSlide {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Botón toggle detalles */
+        .btn-toggle-details {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            background: white;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-toggle-details:hover {
+            background-color: #f8f9fa;
+            border-color: #adb5bd;
+            transform: translateY(-1px);
+        }
+
+        .btn-toggle-details.active {
+            background-color: #f8f9fa;
+            border-color: #0dcaf0;
+            color: #0dcaf0;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: #6c757d;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Alertas */
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 0.9rem 1.2rem;
+            margin-bottom: 1.2rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        /* Ajustes responsive */
+        @media (max-width: 768px) {
+            .page-header {
+                padding: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .page-title {
+                font-size: 1.4rem;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+
+            .page-title i {
+                font-size: 1.2rem;
+            }
+
+            .page-subtitle {
+                font-size: 0.85rem;
+            }
+
+            .user-bar {
+                width: 100%;
+                margin-top: 0.75rem;
+                padding: 0.5rem;
+                justify-content: space-between;
+            }
+
+            .action-buttons {
+                width: 100%;
+                margin-top: 0.75rem;
+            }
+
+            .btn-action {
+                flex: 1;
+                justify-content: center;
+                min-width: 120px;
+            }
+
+            .floating-btn {
+                bottom: 20px;
+                right: 20px;
+                width: 50px;
+                height: 50px;
+                font-size: 1.2rem;
+            }
+
+            .masonry-container {
+                column-gap: 1rem;
+            }
+
+            .masonry-item {
+                margin-bottom: 1rem;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .page-title {
+                font-size: 1.2rem;
+            }
+
+            .stats-badge {
+                font-size: 0.75rem;
+                padding: 0.3rem 0.6rem;
+            }
+
+            .post-header-image {
+                height: 150px;
+            }
+
+            .card-body {
+                padding: 0.75rem;
+            }
+        }
+
+        /* Animaciones */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Scrollbar general */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--color-principal);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #0aa2c0;
+        }
+
+        /* Color options */
+        .color-option {
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            border-radius: 6px;
+            transition: all 0.2s;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .color-option:hover {
             transform: scale(1.1);
+            border-color: #666;
         }
 
-        .post-header-image {
-            position: relative;
+        .color-option.selected {
+            border-color: #0d6efd;
+            transform: scale(1.1);
+            box-shadow: 0 3px 6px rgba(13, 110, 253, 0.25);
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Mensaje de modo solo lectura */
+        .readonly-message {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border: 1px solid #ffc107;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .readonly-message h5 {
+            color: #856404;
+            font-weight: 600;
+        }
+
+        .readonly-message ul {
+            margin-bottom: 0.5rem;
+            padding-left: 1.2rem;
+        }
+
+        .readonly-message li {
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
         }
     </style>
 </head>
@@ -1688,17 +1900,21 @@ function renderPostCard($post, $base_path)
     <!-- ==================== SECCIÓN 12: BARRA DE USUARIO ==================== -->
     <div class="container-fluid py-2 bg-white border-bottom shadow-sm sticky-top">
         <div class="container">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <a href="<?php echo $dashboard_url; ?>" class="text-decoration-none">
-                        <h1 class="h4 mb-0 text-primary">
-                            <i class="bi bi-grid-3x3-gap me-2"></i>
-                            <?php echo htmlspecialchars($sitio_nombre); ?>
-                        </h1>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <a href="<?php echo $dashboard_url; ?>" class="text-decoration-none text-primary">
+                        <i class="bi bi-grid-3x3-gap fs-5"></i>
+                        <span class="d-none d-md-inline ms-1 fw-medium"><?php echo htmlspecialchars($sitio_nombre); ?></span>
                     </a>
+                    <?php if ($contenido): ?>
+                        <span class="text-muted d-none d-md-inline">/</span>
+                        <span class="text-truncate d-none d-md-inline" style="max-width: 200px;">
+                            <?php echo htmlspecialchars($contenido['titulo']); ?>
+                        </span>
+                    <?php endif; ?>
                 </div>
 
-                <div class="user-bar d-flex align-items-center gap-3">
+                <div class="user-bar">
                     <div class="user-info">
                         <?php if ($usuario_logueado): ?>
                             <div class="user-avatar">
@@ -1706,7 +1922,7 @@ function renderPostCard($post, $base_path)
                             </div>
                             <div>
                                 <div class="user-name"><?php echo htmlspecialchars(explode(' ', $usuario_nombre)[0]); ?></div>
-                                <small class="text-muted"><?php echo $es_propietario ? 'Propietario' : 'Usuario'; ?></small>
+                                <small class="text-muted" style="font-size: 0.75rem;"><?php echo $es_propietario ? 'Propietario' : 'Usuario'; ?></small>
                             </div>
                         <?php else: ?>
                             <div class="user-avatar bg-secondary">?</div>
@@ -1717,15 +1933,19 @@ function renderPostCard($post, $base_path)
                     <?php if ($usuario_logueado): ?>
                         <a href="../auth/cerrar.php" class="logout-btn">
                             <i class="bi bi-box-arrow-right"></i>
-                            <span class="d-none d-md-inline">Cerrar sesión</span>
+                            <span class="d-none d-sm-inline">Salir</span>
                         </a>
                     <?php else: ?>
-                        <div class="d-flex gap-2">
-                            <a href="../auth/login.php" class="btn btn-outline-primary btn-sm">
-                                <i class="bi bi-box-arrow-in-right me-1"></i>Ingresar
+                        <div class="d-flex gap-1">
+                            <a href="../auth/login.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                                class="btn btn-outline-primary btn-sm px-2">
+                                <i class="bi bi-box-arrow-in-right"></i>
+                                <span class="d-none d-sm-inline ms-1">Ingresar</span>
                             </a>
-                            <a href="../auth/registro.php" class="btn btn-primary btn-sm">
-                                <i class="bi bi-person-plus me-1"></i>Registrarse
+                            <a href="../auth/registro.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                                class="btn btn-primary btn-sm px-2">
+                                <i class="bi bi-person-plus"></i>
+                                <span class="d-none d-sm-inline ms-1">Registro</span>
                             </a>
                         </div>
                     <?php endif; ?>
@@ -1735,116 +1955,88 @@ function renderPostCard($post, $base_path)
     </div>
 
     <!-- ==================== SECCIÓN 13: CONTENIDO PRINCIPAL ==================== -->
-    <div class="container py-4 fade-in">
+    <div class="container py-3 fade-in">
 
         <?php if ($contenido && !$error_tipo): ?>
 
-            <!-- Header del rotafolio - MEJORADO CON EXPANSIÓN -->
-            <div class="page-header mb-4">
-                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
-                    <div class="flex-grow-1">
-                        <div class="d-flex align-items-center justify-content-between mb-3">
-                            <div>
-                                <h1 class="page-title mb-0">
-                                    <i class="bi bi-grid-3x3-gap text-primary me-2"></i>
-                                    <?php echo htmlspecialchars($contenido['titulo'] ?? 'Sin título'); ?>
-                                </h1>
+            <!-- Header del rotafolio - EFICIENTE Y COMPACTO -->
+            <div class="page-header mb-3">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div class="flex-grow-1 me-2">
+                        <div class="page-title">
+                            <i class="bi bi-grid-3x3-gap"></i>
+                            <div class="flex-grow-1">
+                                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                    <span class="text-truncate" style="max-width: 400px;">
+                                        <?php echo htmlspecialchars($contenido['titulo'] ?? 'Sin título'); ?>
+                                    </span>
+                                    <button class="btn btn-toggle-details" id="toggleHeaderDetails">
+                                        <i class="bi bi-chevron-down" id="headerToggleIcon"></i>
+                                        <span class="d-none d-md-inline">Detalles</span>
+                                    </button>
+                                </div>
 
                                 <?php if (!empty($contenido['descripcion'])): ?>
-                                    <p class="page-subtitle mb-0 mt-1"><?php echo nl2br(htmlspecialchars($contenido['descripcion'])); ?></p>
+                                    <div class="page-subtitle mt-1">
+                                        <?php echo nl2br(htmlspecialchars($contenido['descripcion'])); ?>
+                                    </div>
                                 <?php endif; ?>
                             </div>
-
-                            <button class="btn btn-sm btn-outline-secondary ms-3" id="toggleHeaderDetails">
-                                <i class="bi bi-chevron-down" id="headerToggleIcon"></i>
-                                <span class="d-none d-sm-inline">Detalles</span>
-                            </button>
-                        </div>
-
-                        <!-- Sección expandible -->
-                        <div class="header-details" id="headerDetailsSection" style="display: none;">
-                            <!-- Estadísticas -->
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="stats-badge">
-                                    <i class="bi bi-eye-fill text-primary"></i>
-                                    <?php echo $contenido['vistas'] ?? 0; ?> vistas
-                                </span>
-                                <span class="stats-badge">
-                                    <i class="bi bi-sticky text-success"></i>
-                                    <span id="totalPostsCount"><?php echo count($posts); ?></span> posts
-                                </span>
-                                <?php if ($permite_posts_publicos && !$es_propietario): ?>
-                                    <span class="stats-badge bg-info bg-opacity-10 text-info border-info">
-                                        <i class="bi bi-people-fill"></i>
-                                        <span id="misPostsCount"><?php echo count($mis_posts); ?></span> tus posts
-                                    </span>
-                                <?php endif; ?>
-                                <?php if ($es_propietario): ?>
-                                    <span class="stats-badge bg-warning bg-opacity-10 text-warning border-warning">
-                                        <i class="bi bi-star-fill"></i> Propietario
-                                    </span>
-                                    <?php if ($contenido['es_publico']): ?>
-                                        <span class="stats-badge bg-success bg-opacity-10 text-success border-success">
-                                            <i class="bi bi-globe"></i> Público
-                                        </span>
-                                    <?php else: ?>
-                                        <span class="stats-badge bg-secondary bg-opacity-10 text-secondary border-secondary">
-                                            <i class="bi bi-lock"></i> Privado
-                                        </span>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                            </div>
-
-                            <!-- Fecha de creación -->
-                            <?php if (!empty($contenido['fecha_creacion'])): ?>
-                                <div class="mb-2">
-                                    <small class="text-muted">
-                                        <i class="bi bi-calendar3 me-1"></i>
-                                        Creado: <?php echo date('d/m/Y', strtotime($contenido['fecha_creacion'])); ?>
-                                        <?php if (!empty($contenido['fecha_actualizacion']) && $contenido['fecha_actualizacion'] != $contenido['fecha_creacion']): ?>
-                                            • Actualizado: <?php echo date('d/m/Y', strtotime($contenido['fecha_actualizacion'])); ?>
-                                        <?php endif; ?>
-                                    </small>
-                                </div>
-                            <?php endif; ?>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Botones de acción - Mejorados -->
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                <!-- Sección expandible - INICIALMENTE OCULTA -->
+                <div class="header-details mt-2" id="headerDetailsSection" style="display: none;">
+                    <?php echo generarDetallesRotafolio($contenido, $posts, $mis_posts, $permite_posts_publicos, $es_propietario); ?>
+
+                    <!-- Botones de acción -->
+                    <div class="action-buttons mt-2 pt-2 border-top">
                         <?php if ($es_propietario): ?>
-                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#compartirModal" title="Compartir">
+                            <button class="btn btn-action btn-outline-primary" data-bs-toggle="modal" data-bs-target="#compartirModal">
                                 <i class="bi bi-share"></i>
-                                <span class="d-none d-md-inline ms-1">Compartir</span>
+                                <span>Compartir</span>
                             </button>
-                            <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#editarRotafolioModal" title="Editar rotafolio">
+                            <button class="btn btn-action btn-success" data-bs-toggle="modal" data-bs-target="#editarRotafolioModal">
                                 <i class="bi bi-pencil"></i>
-                                <span class="d-none d-md-inline ms-1">Editar</span>
+                                <span>Editar</span>
                             </button>
                         <?php endif; ?>
-                        <?php if ($permite_posts_publicos || $es_propietario): ?>
-                            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#agregarPostModal" title="Nuevo post">
+                        <?php if (($permite_posts_publicos || $es_propietario) && !$modo_solo_lectura): ?>
+                            <button class="btn btn-action btn-primary" data-bs-toggle="modal" data-bs-target="#agregarPostModal">
                                 <i class="bi bi-plus-lg"></i>
-                                <span class="d-none d-md-inline ms-1">Nuevo Post</span>
-                            </button>
-                        <?php endif; ?>
-
-                        <!-- Botón para mostrar/ocultar todos los posts -->
-                        <?php if (!empty($posts)): ?>
-                            <button class="btn btn-sm btn-outline-secondary" id="toggleAllPosts" title="Mostrar/ocultar todos los posts">
-                                <i class="bi bi-layout-text-sidebar-reverse"></i>
+                                <span>Nuevo Post</span>
                             </button>
                         <?php endif; ?>
                     </div>
                 </div>
-
-                <!-- Barra de progreso para posts -->
-                <?php if (!empty($posts)): ?>
-                    <div class="progress mt-3" style="height: 4px; display: none;" id="postsProgressBar">
-                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
-                    </div>
-                <?php endif; ?>
             </div>
+
+            <!-- Mensaje de modo solo lectura -->
+            <?php if ($modo_solo_lectura): ?>
+                <div class="readonly-message mb-3">
+                    <h5 class="d-flex align-items-center gap-2 mb-2">
+                        <i class="bi bi-info-circle"></i>
+                        Modo solo lectura
+                    </h5>
+                    <p class="mb-2">Este rotafolio está configurado para <strong>usuarios registrados</strong>.</p>
+                    <ul>
+                        <li>✅ <strong>Puedes ver</strong> todos los posts del rotafolio</li>
+                        <li>❌ <strong>No puedes</strong> crear, editar ni eliminar posts</li>
+                        <li>🔒 Para interactuar con el rotafolio, necesitas iniciar sesión o registrarte</li>
+                    </ul>
+                    <div class="d-flex gap-2 mt-2">
+                        <a href="../auth/login.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                            class="btn btn-sm btn-primary">
+                            <i class="bi bi-box-arrow-in-right me-1"></i>Iniciar sesión
+                        </a>
+                        <a href="../auth/registro.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                            class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-person-plus me-1"></i>Crear cuenta
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <!-- Alertas -->
             <?php if ($error_agregar): ?>
@@ -1862,15 +2054,18 @@ function renderPostCard($post, $base_path)
                     </div>
                     <h3 class="h4 mb-3">Aún no hay posts</h3>
                     <p class="text-muted mb-4">Sé el primero en compartir algo en este rotafolio</p>
-                    <?php if ($permite_posts_publicos || $es_propietario): ?>
-                        <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#agregarPostModal">
+                    <?php if (($permite_posts_publicos || $es_propietario) && !$modo_solo_lectura): ?>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#agregarPostModal">
                             <i class="bi bi-plus-lg me-2"></i>Crear el primer post
                         </button>
                     <?php endif; ?>
                 </div>
             <?php else: ?>
                 <div class="mb-4">
-                    <h3 class="h5 mb-3">Posts recientes (<span id="postsCount"><?php echo count($posts); ?></span>)</h3>
+                    <h3 class="h5 mb-3 d-flex align-items-center gap-2">
+                        <i class="bi bi-sticky"></i>
+                        Posts recientes (<span id="postsCount"><?php echo count($posts); ?></span>)
+                    </h3>
                     <?php echo renderPostsGrid($posts, $base_path); ?>
                 </div>
             <?php endif; ?>
@@ -1888,28 +2083,77 @@ function renderPostCard($post, $base_path)
                         <i class="bi bi-lock-fill"></i>
                     </div>
                     <h3 class="h4 mb-3">Acceso restringido</h3>
+                <?php elseif ($error_tipo == 'solo_usuarios_registrados'): ?>
+                    <!-- NUEVO CASO PARA SOLO USUARIOS REGISTRADOS - MODIFICADO -->
+                    <div class="empty-state-icon text-warning">
+                        <i class="bi bi-eye-fill"></i>
+                    </div>
+                    <h3 class="h4 mb-3">Modo solo lectura</h3>
+                    <div class="alert alert-info mb-4 text-start">
+                        <h5 class="alert-heading"><i class="bi bi-info-circle me-2"></i>Información importante</h5>
+                        <p class="mb-2">Este rotafolio está configurado para <strong>usuarios registrados</strong>.</p>
+                        <ul class="mb-0">
+                            <li>✅ <strong>Puedes ver</strong> todos los posts del rotafolio</li>
+                            <li>❌ <strong>No puedes</strong> crear, editar ni eliminar posts</li>
+                            <li>🔒 Para interactuar con el rotafolio, necesitas:</li>
+                        </ul>
+                    </div>
+
+                    <div class="d-flex flex-column gap-3 align-items-center">
+                        <!-- Botones para registro/login -->
+                        <div class="d-flex gap-2 justify-content-center">
+                            <a href="../auth/login.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                                class="btn btn-primary">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>Iniciar sesión
+                            </a>
+                            <a href="../auth/registro.php?redirect=<?php echo urlencode($_SERVER['REQUEST_URI']); ?>"
+                                class="btn btn-outline-primary">
+                                <i class="bi bi-person-plus me-2"></i>Crear cuenta
+                            </a>
+                        </div>
+
+                        <!-- Mensaje alternativo -->
+                        <div class="text-muted small mt-2">
+                            <i class="bi bi-envelope me-1"></i>
+                            Si prefieres no registrarte, contacta al propietario del rotafolio
+                        </div>
+                    </div>
+
+                    <!-- MOSTRAR LOS POSTS AUNQUE SEA MODO SOLO LECTURA -->
+                    <?php if (!empty($posts) && $modo_solo_lectura): ?>
+                        <div class="mt-4 pt-4 border-top">
+                            <h4 class="h5 mb-3">Posts del rotafolio (<span id="postsCount"><?php echo count($posts); ?></span>)</h4>
+                            <div class="alert alert-warning mb-3">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Modo solo lectura:</strong> Estás viendo estos posts como invitado. Para interactuar, inicia sesión o regístrate.
+                            </div>
+                            <?php echo renderPostsGrid($posts, $base_path); ?>
+                        </div>
+                    <?php endif; ?>
                 <?php else: ?>
                     <div class="empty-state-icon text-primary">
                         <i class="bi bi-exclamation-triangle-fill"></i>
                     </div>
                     <h3 class="h4 mb-3">Error</h3>
                 <?php endif; ?>
-                <p class="text-muted mb-4"><?php echo $error_mensaje; ?></p>
-                <a href="<?php echo $dashboard_url; ?>" class="btn btn-primary">
-                    <i class="bi bi-house-door me-2"></i>Ir al Dashboard
-                </a>
+                <?php if ($error_tipo != 'solo_usuarios_registrados'): ?>
+                    <p class="text-muted mb-4"><?php echo $error_mensaje; ?></p>
+                    <a href="<?php echo $dashboard_url; ?>" class="btn btn-primary">
+                        <i class="bi bi-house-door me-2"></i>Ir al Dashboard
+                    </a>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
 
         <!-- Botón flotante para agregar post -->
-        <?php if ($contenido && ($permite_posts_publicos || $es_propietario)): ?>
+        <?php if ($contenido && ($permite_posts_publicos || $es_propietario) && !$modo_solo_lectura): ?>
             <button class="floating-btn" data-bs-toggle="modal" data-bs-target="#agregarPostModal" title="Agregar nuevo post">
                 <i class="bi bi-plus-lg"></i>
             </button>
         <?php endif; ?>
 
         <!-- ==================== SECCIÓN 14: MODALES ==================== -->
-        <?php if ($contenido && ($permite_posts_publicos || $es_propietario)): ?>
+        <?php if ($contenido && ($permite_posts_publicos || $es_propietario) && !$modo_solo_lectura): ?>
             <!-- Modal: Agregar Post -->
             <div class="modal fade" id="agregarPostModal" tabindex="-1" aria-hidden="true">
                 <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -1925,11 +2169,21 @@ function renderPostCard($post, $base_path)
                                 <input type="hidden" name="agregar_post_publico" value="1">
                             <?php endif; ?>
                             <div class="modal-body">
-                                <?php if (!$es_propietario && !$usuario_logueado): ?>
+                                <?php if (!$usuario_logueado): ?>
                                     <div class="mb-4">
                                         <label class="form-label">¿Cómo quieres que te llamemos?</label>
-                                        <input type="text" class="form-control" name="nombre_visitante" maxlength="100" placeholder="Tu nombre (opcional)">
-                                        <small class="text-muted">Si no ingresas un nombre, aparecerás como "Anónimo"</small>
+                                        <input type="text" class="form-control" name="nombre_visitante" maxlength="100"
+                                            placeholder="Tu nombre (opcional)" value="">
+                                        <small class="text-muted">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            Si no ingresas un nombre, aparecerás como <strong>"Anónimo"</strong>
+                                        </small>
+                                    </div>
+                                <?php elseif ($usuario_logueado && !$es_propietario): ?>
+                                    <div class="alert alert-info mb-4">
+                                        <i class="bi bi-person-check me-2"></i>
+                                        <strong>Publicarás como:</strong> <?php echo htmlspecialchars(explode(' ', $usuario_nombre)[0]); ?>
+                                        <small class="d-block mt-1">Tu post aparecerá con tu nombre de usuario.</small>
                                     </div>
                                 <?php endif; ?>
 
@@ -1946,7 +2200,7 @@ function renderPostCard($post, $base_path)
                                             <div id="headerPreview" class="py-4">
                                                 <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                                                 <p class="small mb-1">Haz clic para seleccionar imagen</p>
-                                                <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
+                                                <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 5MB</small>
                                             </div>
                                             <input type="file" class="form-control d-none"
                                                 name="<?php echo $es_propietario ? 'imagen_header' : 'imagen_header_publico'; ?>"
@@ -1963,7 +2217,7 @@ function renderPostCard($post, $base_path)
                                             <div id="filePreview" class="py-4">
                                                 <i class="bi bi-file-earmark fs-1 text-muted d-block mb-2"></i>
                                                 <p class="small mb-1">Haz clic para seleccionar archivo</p>
-                                                <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 1MB</small>
+                                                <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 5MB</small>
                                             </div>
                                             <input type="file" class="form-control d-none"
                                                 name="<?php echo $es_propietario ? 'archivo_adjunto' : 'archivo_adjunto_publico'; ?>"
@@ -2009,6 +2263,7 @@ function renderPostCard($post, $base_path)
         <?php endif; ?>
 
         <!-- Modal: Editar Post -->
+        <!-- Modal: Editar Post (CORREGIDO) -->
         <div class="modal fade" id="editarPostModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered modal-lg">
                 <div class="modal-content">
@@ -2016,9 +2271,10 @@ function renderPostCard($post, $base_path)
                         <h5 class="modal-title">Editar Post</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
-                    <form method="POST" enctype="multipart/form-data" id="formEditarPost"
-                        action="ver_rotafolio_update.php">
-                        <input type="hidden" name="accion" value="actualizar_post">
+                    <!-- QUITAR EL ACTION - Se manejará con AJAX -->
+                    <form method="POST" enctype="multipart/form-data" id="formEditarPost">
+                        <!-- ELIMINAR ESTO: <input type="hidden" name="accion" value="actualizar_post"> -->
+                        <input type="hidden" name="actualizar_post" value="1">
                         <input type="hidden" name="rotafolio_id" value="<?php echo $id; ?>">
                         <input type="hidden" name="post_id" id="postIdEdit">
 
@@ -2035,7 +2291,7 @@ function renderPostCard($post, $base_path)
                                         <div id="headerEditPreview" class="py-4">
                                             <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                                             <p class="small mb-1" id="headerEditText">Haz clic para seleccionar imagen</p>
-                                            <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
+                                            <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 5MB</small>
                                         </div>
                                         <input type="file" class="form-control d-none"
                                             name="imagen_header_edit"
@@ -2053,7 +2309,7 @@ function renderPostCard($post, $base_path)
                                         <div id="fileEditPreview" class="py-4">
                                             <i class="bi bi-file-earmark fs-1 text-muted d-block mb-2"></i>
                                             <p class="small mb-1" id="fileEditText">Haz clic para seleccionar archivo</p>
-                                            <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 1MB</small>
+                                            <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 5MB</small>
                                         </div>
                                         <input type="file" class="form-control d-none"
                                             name="archivo_adjunto_edit"
@@ -2120,6 +2376,7 @@ function renderPostCard($post, $base_path)
                                     <label class="form-label">Descripción</label>
                                     <textarea class="form-control" name="descripcion" rows="3" placeholder="Describe brevemente tu rotafolio..."><?php echo htmlspecialchars($contenido['descripcion'] ?? ''); ?></textarea>
                                 </div>
+
                                 <div class="mb-4">
                                     <label class="form-label mb-3">Color de fondo</label>
                                     <div class="d-flex flex-wrap gap-2">
@@ -2176,20 +2433,61 @@ function renderPostCard($post, $base_path)
                                 <div class="row g-3 mb-4">
                                     <div class="col-md-6">
                                         <div class="form-check form-switch form-switch-lg">
-                                            <input class="form-check-input" type="checkbox" name="es_publico" id="es_publico" value="1" <?php echo $contenido['es_publico'] ? 'checked' : ''; ?> onchange="togglePermitirPosts()">
+                                            <input class="form-check-input" type="checkbox" name="es_publico" id="es_publico" value="1"
+                                                <?php echo ($contenido['es_publico'] ?? false) ? 'checked' : ''; ?>
+                                                onchange="togglePermitirPosts()">
                                             <label class="form-check-label fw-bold" for="es_publico">
                                                 <i class="bi bi-globe me-1"></i>Hacer público
                                             </label>
+                                            <small class="form-text text-muted d-block mt-1">
+                                                Cuando está activado, el rotafolio es visible públicamente
+                                            </small>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="form-check form-switch form-switch-lg">
-                                            <input class="form-check-input" type="checkbox" name="permite_posts_publicos" id="permite_posts_publicos" value="1" <?php echo $contenido['permite_posts_publicos'] ? 'checked' : ''; ?> <?php echo !$contenido['es_publico'] ? 'disabled' : ''; ?> onchange="togglePermitirEdicion()">
+                                            <input class="form-check-input" type="checkbox" name="permite_posts_publicos" id="permite_posts_publicos"
+                                                value="1" <?php echo ($contenido['permite_posts_publicos'] ?? false) ? 'checked' : ''; ?>
+                                                <?php echo !($contenido['es_publico'] ?? false) ? 'disabled' : ''; ?>
+                                                onchange="togglePermitirEdicion()">
                                             <label class="form-check-label fw-bold" for="permite_posts_publicos">
                                                 <i class="bi bi-people-fill me-1"></i>Permitir posts públicos
                                             </label>
+                                            <small class="form-text text-muted d-block mt-1">
+                                                Los visitantes pueden crear posts
+                                            </small>
                                         </div>
                                     </div>
+                                </div>
+
+                                <!-- CAMPO PARA CONTROL DE ACCESO -->
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch form-switch-lg">
+                                            <input class="form-check-input" type="checkbox" name="solo_usuarios_registrados"
+                                                id="solo_usuarios_registrados" value="1"
+                                                <?php echo ($contenido['solo_usuarios_registrados'] ?? false) ? 'checked' : ''; ?>
+                                                <?php echo !($contenido['es_publico'] ?? false) ? 'disabled' : ''; ?>
+                                                onchange="toggleSoloUsuariosRegistrados()">
+                                            <label class="form-check-label fw-bold" for="solo_usuarios_registrados">
+                                                <i class="bi bi-person-lock me-1"></i>Solo usuarios registrados
+                                            </label>
+                                            <small class="form-text text-muted d-block mt-2">
+                                                <strong>Cuando está activado:</strong> Solo los usuarios registrados pueden interactuar con los posts.<br>
+                                                <strong>Los invitados pueden ver</strong> los posts en modo solo lectura.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- NOTA SOBRE LA INTERACCIÓN DE OPCIONES -->
+                                <div class="alert alert-info mt-3">
+                                    <h6 class="alert-heading"><i class="bi bi-info-circle me-2"></i>Configuración de acceso:</h6>
+                                    <ul class="mb-0 small">
+                                        <li><strong>Hacer público:</strong> Habilita o deshabilita la visibilidad del rotafolio.</li>
+                                        <li><strong>Permitir posts públicos:</strong> Los visitantes pueden crear posts (solo si es público).</li>
+                                        <li><strong>Solo usuarios registrados:</strong> Los invitados solo pueden ver posts (solo lectura).</li>
+                                    </ul>
                                 </div>
                             </div>
                             <div class="modal-footer">
@@ -2267,6 +2565,7 @@ function renderPostCard($post, $base_path)
         window.rotafolioId = <?php echo $id; ?>;
         window.misPostsCount = <?php echo count($mis_posts); ?>;
         window.usuarioLogueado = <?php echo $usuario_logueado ? 'true' : 'false'; ?>;
+        window.modoSoloLectura = <?php echo $modo_solo_lectura ? 'true' : 'false'; ?>;
 
         // ====== TinyMCE Configuration ======
         let editorPrincipal = null;
@@ -2282,7 +2581,7 @@ function renderPostCard($post, $base_path)
                     editorPrincipal = tinymce.init({
                         selector: '#editorContenido',
                         license_key: 'gpl',
-                        height: 250,
+                        height: 200,
                         menubar: false,
                         statusbar: false,
                         branding: false,
@@ -2294,7 +2593,7 @@ function renderPostCard($post, $base_path)
                         language: 'es',
                         images_upload_handler: function(blobInfo, progress) {
                             return new Promise((resolve, reject) => {
-                                if (blobInfo.blob().size <= 1024 * 1024) {
+                                if (blobInfo.blob().size <= 5120 * 5120) {
                                     const reader = new FileReader();
                                     reader.onload = function(e) {
                                         resolve(e.target.result);
@@ -2302,7 +2601,7 @@ function renderPostCard($post, $base_path)
                                     reader.readAsDataURL(blobInfo.blob());
                                 } else {
                                     reject({
-                                        message: 'La imagen es demasiado grande. Máximo 1MB.',
+                                        message: 'La imagen es demasiado grande. Máximo 5MB.',
                                         remove: true
                                     });
                                 }
@@ -2331,7 +2630,7 @@ function renderPostCard($post, $base_path)
                     editorEdicion = tinymce.init({
                         selector: '#editorContenidoEdit',
                         license_key: 'gpl',
-                        height: 250,
+                        height: 200,
                         menubar: false,
                         statusbar: false,
                         branding: false,
@@ -2343,7 +2642,7 @@ function renderPostCard($post, $base_path)
                         language: 'es',
                         images_upload_handler: function(blobInfo, progress) {
                             return new Promise((resolve, reject) => {
-                                if (blobInfo.blob().size <= 1024 * 1024) {
+                                if (blobInfo.blob().size <= 5120 * 5120) {
                                     const reader = new FileReader();
                                     reader.onload = function(e) {
                                         resolve(e.target.result);
@@ -2351,7 +2650,7 @@ function renderPostCard($post, $base_path)
                                     reader.readAsDataURL(blobInfo.blob());
                                 } else {
                                     reject({
-                                        message: 'La imagen es demasiado grande. Máximo 1MB.',
+                                        message: 'La imagen es demasiado grande. Máximo 5MB.',
                                         remove: true
                                     });
                                 }
@@ -2388,21 +2687,6 @@ function renderPostCard($post, $base_path)
             }
         });
 
-        // Limpiar cuando se cierren los modales
-        document.getElementById('agregarPostModal')?.addEventListener('hidden.bs.modal', function() {
-            if (tinymce.get('editorContenido')) {
-                tinymce.get('editorContenido').setContent('');
-            }
-        });
-
-        document.getElementById('editarPostModal')?.addEventListener('hidden.bs.modal', function() {
-            if (tinymce.get('editorContenidoEdit')) {
-                tinymce.remove('editorContenidoEdit');
-                editorEdicion = null;
-            }
-            window.currentPostData = null;
-        });
-
         // ====== Funciones de preview ======
         function previewHeaderImage(input) {
             const preview = document.getElementById('headerPreview');
@@ -2410,7 +2694,7 @@ function renderPostCard($post, $base_path)
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 120px;">`;
+                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 100px;">`;
                     container.classList.add('has-file');
                 };
                 reader.readAsDataURL(input.files[0]);
@@ -2422,7 +2706,7 @@ function renderPostCard($post, $base_path)
             const container = document.getElementById('filePreviewContainer');
             if (input.files && input.files[0]) {
                 const file = input.files[0];
-                const fileSize = (file.size / 1024).toFixed(1);
+                const fileSize = (file.size / 5120).toFixed(1);
                 const fileName = file.name.length > 20 ? file.name.substring(0, 20) + '...' : file.name;
                 const fileType = file.name.split('.').pop().toUpperCase();
 
@@ -2450,7 +2734,7 @@ function renderPostCard($post, $base_path)
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 120px;">`;
+                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 100px;">`;
                     text.textContent = 'Imagen seleccionada';
                     container.classList.add('has-file');
                 };
@@ -2464,7 +2748,7 @@ function renderPostCard($post, $base_path)
             const text = document.getElementById('fileEditText');
             if (input.files && input.files[0]) {
                 const file = input.files[0];
-                const fileSize = (file.size / 1024).toFixed(1);
+                const fileSize = (file.size / 5120).toFixed(1);
                 const fileName = file.name.length > 20 ? file.name.substring(0, 20) + '...' : file.name;
                 const fileType = file.name.split('.').pop().toUpperCase();
 
@@ -2558,13 +2842,13 @@ function renderPostCard($post, $base_path)
             const imagenInput = document.getElementById('imagenHeaderEditInput');
             const archivoInput = document.getElementById('archivoAdjuntoEditInput');
 
-            if (imagenInput?.files[0] && imagenInput.files[0].size > 1024 * 1024) {
-                mostrarError('La imagen es demasiado grande. Máximo 1MB.');
+            if (imagenInput?.files[0] && imagenInput.files[0].size > 5120 * 5120) {
+                mostrarError('La imagen es demasiado grande. Máximo 5MB.');
                 return false;
             }
 
-            if (archivoInput?.files[0] && archivoInput.files[0].size > 1024 * 1024) {
-                mostrarError('El archivo adjunto es demasiado grande. Máximo 1MB.');
+            if (archivoInput?.files[0] && archivoInput.files[0].size > 5120 * 5120) {
+                mostrarError('El archivo adjunto es demasiado grande. Máximo 5MB.');
                 return false;
             }
 
@@ -2606,15 +2890,21 @@ function renderPostCard($post, $base_path)
 
         // ====== ELIMINAR ARCHIVO ======
         async function eliminarArchivo(postId, tipoArchivo) {
+            const tipoTexto = tipoArchivo === 'imagen_header' ? 'imagen de encabezado' : 'archivo adjunto';
+
             return Swal.fire({
                 title: '¿Estás seguro?',
-                text: 'Este archivo se eliminará permanentemente',
+                text: `Esta ${tipoTexto} se eliminará permanentemente`,
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#d33',
                 cancelButtonColor: '#3085d6',
                 confirmButtonText: 'Sí, eliminar',
-                cancelButtonText: 'Cancelar'
+                cancelButtonText: 'Cancelar',
+                reverseButtons: true,
+                backdrop: true,
+                allowOutsideClick: false,
+                allowEscapeKey: true
             }).then(async (result) => {
                 if (result.isConfirmed) {
                     try {
@@ -2626,7 +2916,7 @@ function renderPostCard($post, $base_path)
                         const response = await fetch('', {
                             method: 'POST',
                             headers: {
-                                'X-Requested-With': 'XMLHttpRequest'
+                                'X-Requested-Width': 'XMLHttpRequest'
                             },
                             body: formData
                         });
@@ -2634,19 +2924,36 @@ function renderPostCard($post, $base_path)
                         const data = await response.json();
 
                         if (data.success) {
-                            // Actualizar la tarjeta del post
-                            const postCard = document.getElementById('post-' + postId);
-                            if (postCard) {
-                                // Recargar la tarjeta específica o recargar la página
-                                window.location.reload();
-                            }
-                            mostrarOk(data.message);
+                            // Recargar la página para ver los cambios
+                            window.location.reload();
+
+                            // Mostrar mensaje de éxito mientras se recarga
+                            Swal.fire({
+                                title: '¡Eliminado!',
+                                text: data.message || `${tipoTexto} eliminada correctamente`,
+                                icon: 'success',
+                                timer: 1500,
+                                timerProgressBar: true,
+                                showConfirmButton: false,
+                                toast: true,
+                                position: 'top-end'
+                            });
                         } else {
-                            mostrarError(data.message);
+                            Swal.fire({
+                                title: 'Error',
+                                text: data.message || `Error al eliminar la ${tipoTexto}`,
+                                icon: 'error',
+                                confirmButtonText: 'Entendido'
+                            });
                         }
                     } catch (error) {
                         console.error('Error al eliminar archivo:', error);
-                        mostrarError('Error de conexión');
+                        Swal.fire({
+                            title: 'Error de conexión',
+                            text: 'No se pudo eliminar el archivo. Inténtalo de nuevo.',
+                            icon: 'error',
+                            confirmButtonText: 'Entendido'
+                        });
                     }
                 }
             });
@@ -2655,22 +2962,35 @@ function renderPostCard($post, $base_path)
         // ====== Event Listeners ======
         document.addEventListener('DOMContentLoaded', function() {
             inicializarEditorPrincipal();
+            inicializarBotonDetalles();
 
             // Event listeners para botones de acciones en posts
             document.addEventListener('click', function(e) {
-                // Botón de editar
+                // Botón de editar (no permitir en modo solo lectura)
                 if (e.target.closest('.editar-post-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
+
+                    if (window.modoSoloLectura) {
+                        mostrarError('Modo solo lectura: Debes iniciar sesión para editar posts.');
+                        return;
+                    }
+
                     const btn = e.target.closest('.editar-post-btn');
                     const postId = btn.getAttribute('data-post-id');
                     cargarDatosParaEdicion(postId, btn);
                 }
 
-                // Botón de eliminar
+                // Botón de eliminar (no permitir en modo solo lectura)
                 if (e.target.closest('.eliminar-post-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
+
+                    if (window.modoSoloLectura) {
+                        mostrarError('Modo solo lectura: Debes iniciar sesión para eliminar posts.');
+                        return;
+                    }
+
                     const btn = e.target.closest('.eliminar-post-btn');
                     const postId = btn.getAttribute('data-post-id');
                     eliminarPost(postId, btn);
@@ -2683,24 +3003,19 @@ function renderPostCard($post, $base_path)
                     manejarVerMas(e);
                 }
 
-                // Botón eliminar archivo - CON VERIFICACIÓN DE PERMISOS PARA INVITADOS
+                // Botón eliminar archivo (no permitir en modo solo lectura)
                 if (e.target.closest('.eliminar-archivo-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
+
+                    if (window.modoSoloLectura) {
+                        mostrarError('Modo solo lectura: Debes iniciar sesión para eliminar archivos.');
+                        return;
+                    }
+
                     const btn = e.target.closest('.eliminar-archivo-btn');
                     const postId = btn.getAttribute('data-post-id');
                     const tipoArchivo = btn.getAttribute('data-tipo');
-
-                    // Verificar permisos para invitados
-                    if (!window.usuarioLogueado && !window.esPropietario) {
-                        // Para invitados, solo permitir eliminar si el post es suyo
-                        const postCard = document.getElementById('post-' + postId);
-                        if (postCard && !postCard.querySelector('.post-header-image')) {
-                            // Si no es el creador del post, mostrar error
-                            mostrarError('Los usuarios invitados solo pueden eliminar archivos de sus propios posts');
-                            return;
-                        }
-                    }
 
                     eliminarArchivo(postId, tipoArchivo);
                 }
@@ -2717,7 +3032,6 @@ function renderPostCard($post, $base_path)
             if (formEditarPost) {
                 formEditarPost.addEventListener('submit', manejarEditarPost);
             }
-
             // Formulario de editar rotafolio
             const formEditarRotafolio = document.getElementById('formEditarRotafolio');
             if (formEditarRotafolio) {
@@ -2735,7 +3049,7 @@ function renderPostCard($post, $base_path)
                     if (this.files && this.files[0]) {
                         const reader = new FileReader();
                         reader.onload = function(e) {
-                            bgPreview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 150px;">`;
+                            bgPreview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 120px;">`;
                         };
                         reader.readAsDataURL(this.files[0]);
                     }
@@ -2744,9 +3058,9 @@ function renderPostCard($post, $base_path)
 
             // Inicializar selección de color
             inicializarSeleccionColor();
-            configurarInputsParaMovil();
         });
 
+        // ====== FUNCIONES PARA EDICIÓN ======
         // ====== FUNCIONES PARA EDICIÓN ======
         async function cargarDatosParaEdicion(postId, btnElement) {
             try {
@@ -2758,10 +3072,7 @@ function renderPostCard($post, $base_path)
                 formData.append('obtener_datos_edicion', '1');
                 formData.append('post_id', postId);
 
-                console.log('Cargando datos para edición del post ID:', postId);
-                console.log('Usuario logueado:', window.usuarioLogueado);
-                console.log('Es propietario:', window.esPropietario);
-
+                // IMPORTANTE: Usar la misma página
                 const response = await fetch('', {
                     method: 'POST',
                     headers: {
@@ -2771,8 +3082,6 @@ function renderPostCard($post, $base_path)
                 });
 
                 const data = await response.json();
-
-                console.log('Respuesta del servidor:', data);
 
                 btnElement.innerHTML = originalHtml;
                 btnElement.disabled = false;
@@ -2806,6 +3115,93 @@ function renderPostCard($post, $base_path)
             }
         }
 
+        async function manejarEditarPost(e) {
+            e.preventDefault();
+
+            const btn = document.getElementById('btnEditarPost');
+            if (!btn) {
+                console.error('Botón btnEditarPost no encontrado');
+                return;
+            }
+
+            const originalText = btn.innerHTML;
+
+            let contenido = '';
+            try {
+                const editor = tinymce.get('editorContenidoEdit');
+                if (editor && typeof editor.getContent === 'function') {
+                    contenido = editor.getContent();
+                } else {
+                    contenido = document.getElementById('editorContenidoEdit')?.value || '';
+                }
+            } catch (error) {
+                contenido = document.getElementById('editorContenidoEdit')?.value || '';
+            }
+
+            if (!contenido.trim()) {
+                mostrarError('El contenido es requerido');
+                return;
+            }
+
+            const color = document.getElementById('colorEditado').value;
+
+            const imagenInput = document.getElementById('imagenHeaderEditInput');
+            const archivoInput = document.getElementById('archivoAdjuntoEditInput');
+
+            if (imagenInput?.files[0] && imagenInput.files[0].size > 5120 * 5120) {
+                mostrarError('La imagen es demasiado grande. Máximo 5MB.');
+                return false;
+            }
+
+            if (archivoInput?.files[0] && archivoInput.files[0].size > 5120 * 5120) {
+                mostrarError('El archivo adjunto es demasiado grande. Máximo 5MB.');
+                return false;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner me-2"></span>Guardando...';
+
+            const form = e.target;
+            const formData = new FormData(form);
+            formData.set('contenido', contenido);
+
+            try {
+                // IMPORTANTE: Enviar a la misma página (no a update.php)
+                const response = await fetch('', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('editarPostModal'));
+                    if (modal) {
+                        modal.hide();
+                    }
+
+                    mostrarOk(data.message || 'Post actualizado correctamente');
+
+                    // Recargar la página para ver los cambios
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+
+                } else {
+                    mostrarError(data.message || 'Error al actualizar el post');
+                }
+            } catch (error) {
+                console.error('Error en la solicitud:', error);
+                mostrarError('Error de conexión. Inténtalo de nuevo.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
         function mostrarInfoArchivosActuales(data) {
             const currentHeaderInfo = document.getElementById('currentHeaderInfo');
             const headerEditText = document.getElementById('headerEditText');
@@ -2813,11 +3209,11 @@ function renderPostCard($post, $base_path)
             if (data.imagen_header_actual) {
                 currentHeaderInfo.innerHTML = `
                     <div class="d-flex justify-content-between align-items-center">
-                        <div>
+                        <div class="text-truncate">
                             <strong>Imagen actual:</strong> ${data.imagen_header_nombre || data.imagen_header_actual.split('/').pop()}
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarArchivo(${data.post_id}, 'imagen_header')">
-                            <i class="bi bi-trash"></i> Eliminar
+                        <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="eliminarArchivo(${data.post_id}, 'imagen_header')">
+                            <i class="bi bi-trash"></i>
                         </button>
                     </div>
                 `;
@@ -2833,11 +3229,11 @@ function renderPostCard($post, $base_path)
             if (data.archivo_adjunto_actual) {
                 currentFileInfo.innerHTML = `
                     <div class="d-flex justify-content-between align-items-center">
-                        <div>
+                        <div class="text-truncate">
                             <strong>Archivo actual:</strong> ${data.archivo_adjunto_nombre || data.archivo_adjunto_actual.split('/').pop()}
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarArchivo(${data.post_id}, 'archivo_adjunto')">
-                            <i class="bi bi-trash"></i> Eliminar
+                        <button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="eliminarArchivo(${data.post_id}, 'archivo_adjunto')">
+                            <i class="bi bi-trash"></i>
                         </button>
                     </div>
                 `;
@@ -2849,54 +3245,99 @@ function renderPostCard($post, $base_path)
         }
 
         async function eliminarPost(postId, btnElement) {
-            if (!confirm('¿Estás seguro de eliminar este post? Esta acción no se puede deshacer.')) {
-                return;
-            }
+            return Swal.fire({
+                title: '¿Estás seguro?',
+                text: 'Este post se eliminará permanentemente',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Sí, eliminar',
+                cancelButtonText: 'Cancelar',
+                reverseButtons: true,
+                backdrop: true,
+                allowOutsideClick: false,
+                allowEscapeKey: true
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    try {
+                        const originalHtml = btnElement ? btnElement.innerHTML : '<i class="bi bi-trash"></i>';
+                        if (btnElement) {
+                            btnElement.innerHTML = '<span class="loading-spinner"></span>';
+                            btnElement.disabled = true;
+                        }
 
-            try {
-                const originalHtml = btnElement.innerHTML;
-                btnElement.innerHTML = '<span class="loading-spinner"></span>';
-                btnElement.disabled = true;
+                        const formData = new FormData();
+                        formData.append('eliminar_post', '1');
+                        formData.append('post_id', postId);
 
-                const formData = new FormData();
-                formData.append('eliminar_post', '1');
-                formData.append('post_id', postId);
+                        const response = await fetch('', {
+                            method: 'POST',
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            body: formData
+                        });
 
-                const response = await fetch('', {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: formData
-                });
+                        const data = await response.json();
 
-                const data = await response.json();
+                        if (btnElement) {
+                            btnElement.innerHTML = originalHtml;
+                            btnElement.disabled = false;
+                        }
 
-                btnElement.innerHTML = originalHtml;
-                btnElement.disabled = false;
+                        if (data.success) {
+                            const card = document.getElementById('post-' + postId);
+                            if (card) {
+                                // Animación de eliminación
+                                card.style.transition = 'all 0.3s ease';
+                                card.style.opacity = '0';
+                                card.style.transform = 'scale(0.9)';
+                                card.style.margin = '0';
+                                card.style.padding = '0';
+                                card.style.maxHeight = '0';
+                                card.style.overflow = 'hidden';
 
-                if (data.success) {
-                    const card = document.getElementById('post-' + postId);
-                    if (card) {
-                        card.style.opacity = '0';
-                        card.style.transform = 'scale(0.9)';
-                        setTimeout(() => {
-                            card.remove();
-                            actualizarContadores();
-                            if (!window.esPropietario) {
-                                window.misPostsCount = Math.max(0, window.misPostsCount - 1);
-                                actualizarContadorMisPosts();
+                                setTimeout(() => {
+                                    card.remove();
+                                    actualizarContadores();
+                                    if (!window.esPropietario) {
+                                        window.misPostsCount = Math.max(0, window.misPostsCount - 1);
+                                        actualizarContadorMisPosts();
+                                    }
+                                }, 300);
                             }
-                        }, 300);
+
+                            // Mostrar confirmación de éxito
+                            Swal.fire({
+                                title: '¡Eliminado!',
+                                text: data.message || 'Post eliminado correctamente',
+                                icon: 'success',
+                                timer: 2000,
+                                timerProgressBar: true,
+                                showConfirmButton: false,
+                                toast: true,
+                                position: 'top-end'
+                            });
+                        } else {
+                            Swal.fire({
+                                title: 'Error',
+                                text: data.message || 'Error al eliminar el post',
+                                icon: 'error',
+                                confirmButtonText: 'Entendido'
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error al eliminar:', error);
+                        Swal.fire({
+                            title: 'Error de conexión',
+                            text: 'No se pudo eliminar el post. Inténtalo de nuevo.',
+                            icon: 'error',
+                            confirmButtonText: 'Entendido'
+                        });
                     }
-                    mostrarOk(data.message || 'Post eliminado');
-                } else {
-                    mostrarError(data.message || 'Error al eliminar');
                 }
-            } catch (error) {
-                console.error('Error al eliminar:', error);
-                mostrarError('Error de conexión al eliminar');
-            }
+            });
         }
 
         // ====== FUNCIONES PARA MANEJAR CONTENIDO LARGO ======
@@ -2912,15 +3353,15 @@ function renderPostCard($post, $base_path)
             if (contenidoDiv) {
                 if (btn.classList.contains('expandido')) {
                     contenidoDiv.innerHTML = contenidoCompleto;
-                    contenidoDiv.style.maxHeight = '300px';
+                    contenidoDiv.style.maxHeight = '250px';
                     contenidoDiv.style.overflowY = 'auto';
-                    btn.innerHTML = '<i class="bi bi-chevron-down me-1"></i>Ver menos';
+                    btn.innerHTML = '<i class="bi bi-chevron-down me-1"></i>Ver más...';
                     btn.classList.remove('expandido');
                 } else {
                     contenidoDiv.innerHTML = contenidoCompleto;
                     contenidoDiv.style.maxHeight = 'none';
                     contenidoDiv.style.overflowY = 'visible';
-                    btn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Ver más';
+                    btn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Ver menos';
                     btn.classList.add('expandido');
                 }
             }
@@ -2948,18 +3389,18 @@ function renderPostCard($post, $base_path)
             const imagenHeaderInput = document.getElementById('imagenHeaderInput');
             const archivoAdjuntoInput = document.getElementById('archivoAdjuntoInput');
 
-            if (imagenHeaderInput.files[0] && imagenHeaderInput.files[0].size > 1024 * 1024) {
-                mostrarError('La imagen de encabezado es demasiado grande. Máximo 1MB');
+            if (imagenHeaderInput.files[0] && imagenHeaderInput.files[0].size > 5120 * 5120) {
+                mostrarError('La imagen de encabezado es demasiado grande. Máximo 5MB');
                 return false;
             }
 
-            if (archivoAdjuntoInput.files[0] && archivoAdjuntoInput.files[0].size > 1024 * 1024) {
-                mostrarError('El archivo adjunto es demasiado grande. Máximo 1MB');
+            if (archivoAdjuntoInput.files[0] && archivoAdjuntoInput.files[0].size > 5120 * 5120) {
+                mostrarError('El archivo adjunto es demasiado grande. Máximo 5MB');
                 return false;
             }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Publicando...';
+            btn.innerHTML = '<span class="loading-spinner me-2"></span>Publicando...';
 
             const fd = new FormData(form);
             if (esPropietario) {
@@ -2991,12 +3432,12 @@ function renderPostCard($post, $base_path)
                     document.getElementById('headerPreview').innerHTML = `
                         <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                         <p class="small mb-1">Haz clic para seleccionar imagen</p>
-                        <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
+                        <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 5MB</small>
                     `;
                     document.getElementById('filePreview').innerHTML = `
                         <i class="bi bi-file-earmark fs-1 text-muted d-block mb-2"></i>
                         <p class="small mb-1">Haz clic para seleccionar archivo</p>
-                        <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 1MB</small>
+                        <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 5MB</small>
                     `;
                     document.getElementById('headerPreviewContainer').classList.remove('has-file');
                     document.getElementById('filePreviewContainer').classList.remove('has-file');
@@ -3029,7 +3470,7 @@ function renderPostCard($post, $base_path)
             }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Guardando...';
+            btn.innerHTML = '<span class="loading-spinner me-2"></span>Guardando...';
 
             const fd = new FormData(form);
             try {
@@ -3139,9 +3580,28 @@ function renderPostCard($post, $base_path)
         function togglePermitirPosts() {
             const esPublico = document.getElementById('es_publico');
             const permitePosts = document.getElementById('permite_posts_publicos');
-            if (esPublico && permitePosts) {
-                permitePosts.disabled = !esPublico.checked;
-                if (!esPublico.checked) {
+            const soloUsuariosRegistrados = document.getElementById('solo_usuarios_registrados');
+
+            if (esPublico && permitePosts && soloUsuariosRegistrados) {
+                const habilitado = esPublico.checked;
+
+                permitePosts.disabled = !habilitado;
+                soloUsuariosRegistrados.disabled = !habilitado;
+
+                if (!habilitado) {
+                    permitePosts.checked = false;
+                    soloUsuariosRegistrados.checked = false;
+                }
+            }
+        }
+
+        function toggleSoloUsuariosRegistrados() {
+            const soloUsuariosRegistrados = document.getElementById('solo_usuarios_registrados');
+            const permitePosts = document.getElementById('permite_posts_publicos');
+
+            if (soloUsuariosRegistrados && permitePosts) {
+                // Si se activa "solo usuarios registrados", desactivar "permite posts públicos"
+                if (soloUsuariosRegistrados.checked) {
                     permitePosts.checked = false;
                 }
             }
@@ -3149,10 +3609,17 @@ function renderPostCard($post, $base_path)
 
         function togglePermitirEdicion() {
             const permitePosts = document.getElementById('permite_posts_publicos');
-            if (permitePosts) {
-                const nuevoEstado = permitePosts.checked ? 'activada' : 'desactivada';
-                mostrarOk(`La publicación por visitantes ha sido ${nuevoEstado}`);
+            const soloUsuariosRegistrados = document.getElementById('solo_usuarios_registrados');
+
+            if (permitePosts && soloUsuariosRegistrados) {
+                // Si se activa "permite posts públicos", desactivar "solo usuarios registrados"
+                if (permitePosts.checked) {
+                    soloUsuariosRegistrados.checked = false;
+                }
             }
+
+            const nuevoEstado = permitePosts.checked ? 'activada' : 'desactivada';
+            mostrarOk(`La publicación por visitantes ha sido ${nuevoEstado}`);
         }
 
         function copiarEnlace(inputId, btn) {
@@ -3233,12 +3700,12 @@ function renderPostCard($post, $base_path)
                 document.getElementById('headerEditPreview').innerHTML = `
                     <i class="bi bi-image fs-1 text-muted d-block mb-2"></i>
                     <p class="small mb-1" id="headerEditText">Haz clic para seleccionar imagen</p>
-                    <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 1MB</small>
+                    <small class="text-muted d-block">JPEG, PNG, GIF o WebP • Máx. 5MB</small>
                 `;
                 document.getElementById('fileEditPreview').innerHTML = `
                     <i class="bi bi-file-earmark fs-1 text-muted d-block mb-2"></i>
                     <p class="small mb-1" id="fileEditText">Haz clic para seleccionar archivo</p>
-                    <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 1MB</small>
+                    <small class="text-muted d-block">PDF, DOCX o XLSX • Máx. 5MB</small>
                 `;
             }
         }
@@ -3247,67 +3714,60 @@ function renderPostCard($post, $base_path)
             cerrarModalEdicion();
         });
 
-        // ====== FUNCIONES PARA MANEJO MÓVIL ======
-        function esDispositivoMovil() {
-            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        }
+        // ====== FUNCIONALIDAD PARA EL BOTÓN "DETALLES" ======
+        function inicializarBotonDetalles() {
+            // Botón detalles
+            const toggleBtn = document.getElementById('toggleHeaderDetails');
+            const detailsSection = document.getElementById('headerDetailsSection');
+            const toggleIcon = document.getElementById('headerToggleIcon');
 
-        function configurarInputsParaMovil() {
-            if (!esDispositivoMovil()) return;
+            if (toggleBtn && detailsSection) {
+                // Configurar el estado inicial
+                let detallesVisible = false;
 
-            const imagenInputs = document.querySelectorAll('input[type="file"][accept="image/*"]');
-            imagenInputs.forEach(input => {
-                if (!input.hasAttribute('capture')) {
-                    input.setAttribute('capture', 'environment');
-                }
-            });
+                toggleBtn.addEventListener('click', function() {
+                    detallesVisible = !detallesVisible;
 
-            document.querySelectorAll('.file-preview').forEach(el => {
-                el.style.minHeight = '120px';
-                el.style.padding = '1.5rem';
-            });
+                    if (detallesVisible) {
+                        // Mostrar detalles
+                        detailsSection.style.display = 'block';
+                        toggleIcon.className = 'bi bi-chevron-up';
+                        toggleBtn.setAttribute('title', 'Ocultar detalles');
+                        toggleBtn.classList.add('active');
+
+                        // Animación suave
+                        detailsSection.style.opacity = '0';
+                        detailsSection.style.transform = 'translateY(-8px)';
+
+                        setTimeout(() => {
+                            detailsSection.style.transition = 'all 0.3s ease';
+                            detailsSection.style.opacity = '1';
+                            detailsSection.style.transform = 'translateY(0)';
+                        }, 10);
+                    } else {
+                        // Ocultar detalles
+                        detailsSection.style.transition = 'all 0.3s ease';
+                        detailsSection.style.opacity = '0';
+                        detailsSection.style.transform = 'translateY(-8px)';
+                        toggleIcon.className = 'bi bi-chevron-down';
+                        toggleBtn.setAttribute('title', 'Mostrar detalles');
+                        toggleBtn.classList.remove('active');
+
+                        // Ocultar después de la animación
+                        setTimeout(() => {
+                            detailsSection.style.display = 'none';
+                        }, 300);
+                    }
+                });
+
+                // Configurar tooltip
+                toggleBtn.setAttribute('title', 'Mostrar detalles');
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            configurarInputsParaMovil();
-
-            const modales = ['agregarPostModal', 'editarPostModal', 'editarRotafolioModal'];
-            modales.forEach(modalId => {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.addEventListener('shown.bs.modal', configurarInputsParaMovil);
-                }
-            });
-
-            window.addEventListener('orientationchange', function() {
-                setTimeout(configurarInputsParaMovil, 100);
-            });
-
-            window.addEventListener('resize', function() {
-                if (window.innerWidth <= 768) {
-                    configurarInputsParaMovil();
-                }
-            });
+            inicializarBotonDetalles();
         });
-
-        if (esDispositivoMovil()) {
-            document.addEventListener('touchstart', function(e) {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
-                    document.body.style.zoom = "100%";
-                }
-            }, {
-                passive: true
-            });
-
-            document.querySelectorAll('.modal').forEach(modal => {
-                modal.addEventListener('shown.bs.modal', function() {
-                    const modalBody = this.querySelector('.modal-body');
-                    if (modalBody) {
-                        modalBody.style.WebkitOverflowScrolling = 'touch';
-                    }
-                });
-            });
-        }
     </script>
 </body>
 

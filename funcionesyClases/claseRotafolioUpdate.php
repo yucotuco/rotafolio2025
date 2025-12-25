@@ -14,8 +14,8 @@ class RotafolioUpdateManager
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     ];
-    const MAX_IMAGE_SIZE = 1048576; // 1MB
-    const MAX_DOCUMENT_SIZE = 1048576; // 1MB
+    const MAX_IMAGE_SIZE = 1048576; // 5MB
+    const MAX_DOCUMENT_SIZE = 1048576; // 5MB
 
     public function __construct($pdo)
     {
@@ -383,7 +383,7 @@ class RotafolioUpdateManager
         }
 
         if ($file['size'] > $max_size) {
-            return [false, "Archivo demasiado grande. Máximo: " . ($max_size / 1024 / 1024) . "MB"];
+            return [false, "Archivo demasiado grande. Máximo: " . ($max_size / 5120 / 5120) . "MB"];
         }
 
         // Generar nombre único

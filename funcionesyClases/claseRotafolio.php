@@ -308,7 +308,7 @@ class RotafolioManager
         }
 
         if ($file['size'] > $max_size) {
-            return [false, "Archivo demasiado grande. Máximo: " . ($max_size / 1024 / 1024) . "MB"];
+            return [false, "Archivo demasiado grande. Máximo: " . ($max_size / 5120 / 5120) . "MB"];
         }
 
         // Generar nombre único seguro
